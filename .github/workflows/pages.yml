@@ -1,0 +1,69 @@
+name: Deploy website to GitHub Pages
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - web/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+        id: pages
+
+      - name: Install mdBook
+        run: |
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          sudo mv mdbook /usr/local/bin/
+
+      - name: Build documentation (mdBook)
+        working-directory: web
+        env:
+          MDBOOK_OUTPUT__HTML__SITE_URL: ${{ steps.pages.outputs.base_path }}/docs/
+        run: mdbook build --dest-dir ../_site/docs
+
+      # Gatsby 2 requires an old Node version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 14
+
+      - name: Build front page (Gatsby)
+        working-directory: web/frontpage
+        env:
+          PATH_PREFIX: ${{ steps.pages.outputs.base_path }}
+        run: |
+          npm install
+          npm run build -- --prefix-paths
+
+      - name: Merge front page and documentation
+        run: cp -r web/frontpage/public/. _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

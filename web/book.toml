@@ -1,0 +1,7 @@
+[book]
+title = "Picard"
+language = "en"
+src = "docs"
+
+[output.html]
+git-repository-url = "https://github.com/picard-rs/picard"
