@@ -177,8 +177,62 @@ impl BasicTimer {
     pub fn schedule_repeat(&mut self, mut job: RepeatJob) {
         if Instant::now() >= job.send_at {
             job.send();
+            job.send_at = Instant::now() + job.interval;
         }
         self.repeat_jobs.push(job);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BasicTimer, RepeatJob};
+    use crate::actors::*;
+    use crate::AnyMessage;
+    use std::{
+        sync::mpsc::{self, Sender as ChannelSender},
+        time::{Duration, Instant},
+    };
+
+    struct NotifyActor(ChannelSender<()>);
+
+    impl ActorFactoryArgs<ChannelSender<()>> for NotifyActor {
+        fn create_args(sender: ChannelSender<()>) -> Self {
+            NotifyActor(sender)
+        }
+    }
+
+    impl Actor for NotifyActor {
+        type Msg = ();
+
+        fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {
+            let _ = self.0.send(());
+        }
+    }
+
+    #[test]
+    fn overdue_repeat_job_waits_for_interval_after_first_send() {
+        let system = ActorSystem::new().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let actor = system
+            .actor_of_args::<NotifyActor, _>("timer-repeat-test", tx)
+            .unwrap();
+        let mut timer = BasicTimer {
+            once_jobs: Vec::new(),
+            repeat_jobs: Vec::new(),
+        };
+
+        timer.schedule_repeat(RepeatJob {
+            id: uuid::Uuid::new_v4(),
+            send_at: Instant::now() - Duration::from_secs(1),
+            interval: Duration::from_secs(30),
+            receiver: actor.into(),
+            sender: None,
+            msg: AnyMessage::new((), false),
+        });
+
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        timer.execute_repeat_jobs();
+        assert!(rx.try_recv().is_err());
     }
 }
 

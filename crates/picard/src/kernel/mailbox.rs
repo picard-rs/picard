@@ -4,8 +4,6 @@ use std::sync::{
 };
 use std::thread;
 
-use config::Config;
-
 use crate::{
     actor::actor_cell::ExtendedCell,
     actor::*,
@@ -375,18 +373,5 @@ where
             },
             None,
         );
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct MailboxConfig {
-    pub msg_process_limit: u32,
-}
-
-impl<'a> From<&'a Config> for MailboxConfig {
-    fn from(cfg: &Config) -> Self {
-        MailboxConfig {
-            msg_process_limit: cfg.get_int("mailbox.msg_process_limit").unwrap() as u32,
-        }
     }
 }

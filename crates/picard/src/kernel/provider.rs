@@ -53,7 +53,7 @@ impl Provider {
         self.register(&path)?;
 
         let uri = ActorUri {
-            path,
+            path: path.clone(),
             name: Arc::from(name),
             host: sys.host(),
         };
@@ -70,7 +70,13 @@ impl Provider {
             sender,
         );
 
-        let k = kernel(props, cell.clone(), mb, sys)?;
+        let k = match kernel(props, cell.clone(), mb, sys) {
+            Ok(kernel) => kernel,
+            Err(err) => {
+                self.unregister(&path);
+                return Err(err);
+            }
+        };
         let cell = cell.init(&k);
 
         let actor = ActorRef::new(cell);

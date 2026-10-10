@@ -101,7 +101,7 @@ impl ActorSelection {
                     let child = anchor.children().filter(|c| c.name() == name).last();
                     if path_vec.peek().is_none() {
                         if let Some(actor_ref) = child {
-                            actor_ref.try_tell(msg, sender.clone()).unwrap();
+                            let _ = actor_ref.try_tell(msg, sender.clone());
                         }
                     } else if path_vec.peek().is_some() && child.is_some() {
                         walk(
@@ -161,7 +161,7 @@ impl ActorSelection {
                     let child = anchor.children().filter(|c| c.name() == name).last();
                     if path_vec.peek().is_none() {
                         if let Some(actor_ref) = child {
-                            actor_ref.try_tell(msg, sender.clone()).unwrap();
+                            actor_ref.sys_tell(msg);
                         }
                     } else if path_vec.peek().is_some() && child.is_some() {
                         walk(

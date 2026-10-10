@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use config::Config;
-use log::trace;
+use log::{error, trace};
 use picard::actors::*;
 
 /// Messages understood by the entity manager actor.
@@ -103,9 +103,17 @@ where
                 id,
                 cmd
             );
-            let entity = ctx
-                .actor_of_props(id.as_ref(), self.props.props(id.clone()))
-                .unwrap();
+            let actor_name = entity_actor_name(&id);
+            let entity = match ctx.actor_of_props(&actor_name, self.props.props(id.clone())) {
+                Ok(entity) => entity,
+                Err(err) => {
+                    error!(
+                        "CQRS: Failed to start entity {} ({:?}): {:?}",
+                        self.name, id, err
+                    );
+                    return;
+                }
+            };
             entity.tell(cmd, sender);
 
             let entity = EntityInstance {
@@ -167,6 +175,14 @@ where
     }
 }
 
+fn entity_actor_name(id: &str) -> String {
+    let mut name = String::from("entity-");
+    for byte in id.as_bytes() {
+        name.push_str(&format!("{:02x}", byte));
+    }
+    name
+}
+
 struct EntityInstance<Msg: Message> {
     last_used: SystemTime,
     actor: ActorRef<Msg>,
@@ -196,6 +212,7 @@ mod tests {
     pub enum TestMsg {
         CreateAccountCmd(String),
         AddAmountCmd(i32),
+        Notify(std::sync::mpsc::Sender<()>),
     }
 
     #[derive(Clone, Debug)]
@@ -221,6 +238,9 @@ mod tests {
 
         fn recv(&mut self, _: &Context<TestMsg>, msg: TestMsg, _: Sender) {
             match (&mut self.state, msg) {
+                (_, TestMsg::Notify(tx)) => {
+                    let _ = tx.send(());
+                }
                 (None, TestMsg::CreateAccountCmd(name)) => {
                     self.state = Some(BankAccount {
                         id: self.id.clone(),
@@ -275,5 +295,19 @@ mod tests {
         }
 
         thread::sleep(time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn entity_ids_with_path_characters_are_routed_safely() {
+        let system = ActorSystem::new().unwrap();
+        let manager = Entity::new(&system, BankAccountActorFact, "EntityName", None).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        manager.tell(
+            EntityMsg::Cmd("account/with/slashes".into(), TestMsg::Notify(tx)),
+            None,
+        );
+
+        rx.recv_timeout(time::Duration::from_secs(2)).unwrap();
     }
 }

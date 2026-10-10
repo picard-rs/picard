@@ -2,7 +2,7 @@ use std::{
     fmt,
     ops::Deref,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -37,10 +37,8 @@ struct ActorCellInner {
     uri: ActorUri,
     parent: Option<BasicActorRef>,
     children: Children,
-    is_remote: bool,
     is_terminating: Arc<AtomicBool>,
     is_restarting: Arc<AtomicBool>,
-    status: Arc<AtomicUsize>,
     kernel: Option<KernelRef>,
     system: ActorSystem,
     mailbox: Arc<dyn AnySender>,
@@ -61,10 +59,8 @@ impl ActorCell {
                 uri,
                 parent,
                 children: Children::new(),
-                is_remote: false,
                 is_terminating: Arc::new(AtomicBool::new(false)),
                 is_restarting: Arc::new(AtomicBool::new(false)),
-                status: Arc::new(AtomicUsize::new(0)),
                 kernel: None,
                 system: system.clone(),
                 mailbox,
@@ -307,10 +303,8 @@ where
                 uri,
                 parent,
                 children: Children::new(),
-                is_remote: false,
                 is_terminating: Arc::new(AtomicBool::new(false)),
                 is_restarting: Arc::new(AtomicBool::new(false)),
-                status: Arc::new(AtomicUsize::new(0)),
                 kernel: None,
                 system: system.clone(),
                 mailbox: any_mailbox,
@@ -431,7 +425,7 @@ fn post_stop<A: Actor>(actor: &mut Option<A>) {
 /// Operations performed are in most cases done so from the
 /// actor's perspective. For example, creating a child actor
 /// using `ctx.actor_of` will create the child under the current
-/// actor within the heirarchy.
+/// actor within the hierarchy.
 ///
 /// Since `Context` is specific to an actor and its functions
 /// it is not cloneable.

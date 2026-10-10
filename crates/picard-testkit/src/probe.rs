@@ -21,8 +21,10 @@ pub trait ProbeReceive {
 pub mod channel {
     use super::{Probe, ProbeReceive};
 
-    use chrono::prelude::*;
-    use std::sync::mpsc::{channel, Receiver, Sender};
+    use std::{
+        sync::mpsc::{channel, Receiver, Sender},
+        time::Instant,
+    };
 
     pub fn probe<T: Send>() -> (ChannelProbe<(), T>, ChannelProbeReceive<T>) {
         probe_with_payload(())
@@ -41,7 +43,7 @@ pub mod channel {
         let receiver = ChannelProbeReceive {
             rx: rx,
             tx: tx,
-            timer_start: Utc::now(),
+            timer_start: Instant::now(),
         };
 
         (probe, receiver)
@@ -91,7 +93,7 @@ pub mod channel {
     pub struct ChannelProbeReceive<T> {
         rx: Receiver<T>,
         tx: Sender<T>,
-        timer_start: DateTime<Utc>,
+        timer_start: Instant,
     }
 
     impl<T: Send> ProbeReceive for ChannelProbeReceive<T> {
@@ -102,21 +104,39 @@ pub mod channel {
         }
 
         fn reset_timer(&mut self) {
-            self.timer_start = Utc::now();
+            self.timer_start = Instant::now();
         }
 
         fn last_event_milliseconds(&self) -> u64 {
-            let now = Utc::now();
-            now.time()
-                .signed_duration_since(self.timer_start.time())
-                .num_milliseconds() as u64
+            self.timer_start.elapsed().as_millis() as u64
         }
 
         fn last_event_seconds(&self) -> u64 {
-            let now = Utc::now();
-            now.time()
-                .signed_duration_since(self.timer_start.time())
-                .num_seconds() as u64
+            self.timer_start.elapsed().as_secs()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::ChannelProbeReceive;
+        use crate::probe::ProbeReceive;
+        use std::{
+            sync::mpsc,
+            time::{Duration, Instant},
+        };
+
+        #[test]
+        fn elapsed_time_uses_monotonic_clock() {
+            let (tx, rx) = mpsc::channel::<()>();
+            let mut listen = ChannelProbeReceive {
+                rx,
+                tx,
+                timer_start: Instant::now() - Duration::from_secs(2),
+            };
+
+            assert!(listen.last_event_seconds() >= 2);
+            listen.reset_timer();
+            assert!(listen.last_event_milliseconds() < 1000);
         }
     }
 }

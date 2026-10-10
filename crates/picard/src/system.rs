@@ -170,6 +170,7 @@ pub struct ProtoSystem {
     config: Config,
     pub(crate) sys_settings: SystemSettings,
     started_at: DateTime<Utc>,
+    started_instant: Instant,
 }
 
 #[derive(Default)]
@@ -329,6 +330,7 @@ impl ActorSystem {
             config: cfg.clone(),
             sys_settings: SystemSettings::from(&cfg),
             started_at: Utc::now(),
+            started_instant: Instant::now(),
         };
 
         // 2. create uninitialized system
@@ -377,10 +379,7 @@ impl ActorSystem {
 
     /// Returns the number of seconds since the system started
     pub fn uptime(&self) -> u64 {
-        let now = Utc::now();
-        now.time()
-            .signed_duration_since(self.start_date().time())
-            .num_seconds() as u64
+        self.proto.started_instant.elapsed().as_secs()
     }
 
     /// Returns the hostname used when the system started
@@ -760,8 +759,7 @@ impl Timer for ActorSystem {
         T: Message + Into<M>,
         M: Message,
     {
-        let delay = std::cmp::max(time.timestamp() - Utc::now().timestamp(), 0_i64);
-        let delay = Duration::from_secs(delay as u64);
+        let delay = delay_until(time, Utc::now());
 
         let id = Uuid::new_v4();
         let msg: M = msg.into();
@@ -780,6 +778,37 @@ impl Timer for ActorSystem {
 
     fn cancel_schedule(&self, id: Uuid) {
         let _ = self.timer.send(Job::Cancel(id));
+    }
+}
+
+fn delay_until(time: DateTime<Utc>, now: DateTime<Utc>) -> Duration {
+    time.signed_duration_since(now)
+        .to_std()
+        .unwrap_or(Duration::ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delay_until;
+    use chrono::{Duration as ChronoDuration, Utc};
+    use std::time::Duration;
+
+    #[test]
+    fn schedule_delay_preserves_subsecond_precision() {
+        let now = Utc::now();
+        assert_eq!(
+            delay_until(now + ChronoDuration::milliseconds(250), now),
+            Duration::from_millis(250)
+        );
+    }
+
+    #[test]
+    fn schedule_delay_is_zero_for_past_times() {
+        let now = Utc::now();
+        assert_eq!(
+            delay_until(now - ChronoDuration::milliseconds(250), now),
+            Duration::ZERO
+        );
     }
 }
 
