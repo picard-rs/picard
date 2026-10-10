@@ -3,7 +3,7 @@ members = ["crates/picard", "crates/picard-cqrs", "crates/picard-patterns", "cra
 
 [workspace.package]
 authors = ["Lee Smith <lee@picard.rs>", "Steve Biedermann <hardliner66@gmail.com>"]
-edition = "2018"
+edition = "2024"
 repository = "https://github.com/picard-rs/picard"
 license-file = "LICENSE"
 keywords = ["actors", "actor-model", "async", "cqrs", "event_sourcing"]

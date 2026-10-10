@@ -781,7 +781,7 @@ impl Timer for ActorSystem {
     }
 }
 
-fn delay_until(time: DateTime<Utc>, now: DateTime<Utc>) -> Duration {
+pub(crate) fn delay_until(time: DateTime<Utc>, now: DateTime<Utc>) -> Duration {
     time.signed_duration_since(now)
         .to_std()
         .unwrap_or(Duration::ZERO)

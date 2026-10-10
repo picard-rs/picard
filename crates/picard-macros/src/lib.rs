@@ -86,7 +86,7 @@ pub fn actor(
     let rec = receive(&ast.ident, &ast.generics, &name, &types);
 
     let input: TokenStream = input.into();
-    let gen = quote! {
+    let g = quote! {
         #input
         #menum
         #intos
@@ -94,7 +94,7 @@ pub fn actor(
         #rec
     };
 
-    gen.into()
+    g.into()
 }
 
 fn intos(name: &Ident, types: &MsgTypes) -> TokenStream {
@@ -107,8 +107,8 @@ fn intos(name: &Ident, types: &MsgTypes) -> TokenStream {
     }
 }
 
-fn receive(aname: &Ident, gen: &Generics, name: &Ident, types: &MsgTypes) -> TokenStream {
-    let (impl_generics, ty_generics, where_clause) = gen.split_for_impl();
+fn receive(aname: &Ident, g: &Generics, name: &Ident, types: &MsgTypes) -> TokenStream {
+    let (impl_generics, ty_generics, where_clause) = g.split_for_impl();
 
     let vars = types.types.iter().map(|t| {
         let vname = &t.name;

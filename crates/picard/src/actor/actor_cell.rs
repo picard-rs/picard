@@ -597,8 +597,7 @@ where
         T: Message + Into<M>,
         M: Message,
     {
-        let delay = std::cmp::max(time.timestamp() - Utc::now().timestamp(), 0_i64);
-        let delay = Duration::from_secs(delay as u64);
+        let delay = crate::system::delay_until(time, Utc::now());
 
         let id = Uuid::new_v4();
         let msg: M = msg.into();
