@@ -14,17 +14,15 @@ pub(crate) type GlobalLoggerGuard = Arc<slog_scope::GlobalLoggerGuard>;
 pub struct LoggerConfig {
     time_fmt: String,
     date_fmt: String,
-    log_fmt: String,
     filter: Vec<String>,
     level: Level,
 }
 
-impl<'a> From<&'a Config> for LoggerConfig {
+impl From<&Config> for LoggerConfig {
     fn from(config: &Config) -> Self {
         LoggerConfig {
             time_fmt: config.get_str("log.time_format").unwrap(),
             date_fmt: config.get_str("log.date_format").unwrap(),
-            log_fmt: config.get_str("log.log_format").unwrap(),
             filter: config
                 .get_array("log.filter")
                 .unwrap_or_default()

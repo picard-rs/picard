@@ -183,6 +183,18 @@ impl BasicTimer {
     }
 }
 
+struct BasicTimerConfig {
+    frequency_millis: u64,
+}
+
+impl From<&Config> for BasicTimerConfig {
+    fn from(config: &Config) -> Self {
+        BasicTimerConfig {
+            frequency_millis: config.get_int("scheduler.frequency_millis").unwrap() as u64,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BasicTimer, RepeatJob};
@@ -233,17 +245,5 @@ mod tests {
         rx.recv_timeout(Duration::from_secs(1)).unwrap();
         timer.execute_repeat_jobs();
         assert!(rx.try_recv().is_err());
-    }
-}
-
-struct BasicTimerConfig {
-    frequency_millis: u64,
-}
-
-impl<'a> From<&'a Config> for BasicTimerConfig {
-    fn from(config: &Config) -> Self {
-        BasicTimerConfig {
-            frequency_millis: config.get_int("scheduler.frequency_millis").unwrap() as u64,
-        }
     }
 }

@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/picard", "crates/picard-cqrs", "crates/picard-patterns", "crates/picard-testkit", "crates/picard-macros"]
+resolver = "3"
 
 [workspace.package]
 authors = ["Lee Smith <lee@picard.rs>", "Steve Biedermann <hardliner66@gmail.com>"]

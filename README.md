@@ -76,6 +76,17 @@ Official crates that provide additional functionality:
 - [picard-testkit](https://github.com/picard-rs/picard-testkit): Tools to make testing easier
 - [picard-patterns](https://github.com/picard-rs/picard-patterns): Common actor patterns, including `transform!` and 'ask'
 
+## Benchmarks
+
+Run the Picard runtime benchmarks in release mode with:
+
+```bash
+cargo bench -p picard --bench runtime
+```
+
+The benchmark target measures typed and untyped message throughput (including
+mailbox processing), actor round-trip latency, and actor creation.
+
 ## Roadmap & Currently in Development
 
 The next major theme on the project roadmap is clustering and location transparency:

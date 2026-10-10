@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use picard::actors::*;
 
 #[actor(String, u32)]

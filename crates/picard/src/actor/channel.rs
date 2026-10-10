@@ -13,9 +13,6 @@ use crate::{
 
 type Subs<Msg> = HashMap<Topic, Vec<BoxedTell<Msg>>>;
 
-/// A specialized actor for providing Publish/Subscribe capabilities to users.
-///
-
 // Generic Channel
 pub type ChannelCtx<Msg> = Context<ChannelMsg<Msg>>;
 pub type ChannelRef<Msg> = ActorRef<ChannelMsg<Msg>>;
@@ -58,15 +55,14 @@ where
     // to this system event. This allows us to remove actors that have been
     // terminated but did not explicity unsubscribe before terminating.
     fn sys_recv(&mut self, _: &ChannelCtx<Msg>, msg: SystemMsg, sender: Sender) {
-        if let SystemMsg::Event(evt) = msg {
-            if let SystemEvent::ActorTerminated(terminated) = evt {
+        if let SystemMsg::Event(evt) = msg
+            && let SystemEvent::ActorTerminated(terminated) = evt {
                 let subs = self.subs.clone();
 
                 for topic in subs.keys() {
                     unsubscribe(&mut self.subs, topic, &terminated.actor);
                 }
             }
-        }
     }
 }
 
@@ -149,8 +145,8 @@ where
 
 fn unsubscribe<Msg>(subs: &mut Subs<Msg>, topic: &Topic, actor: &dyn ActorReference) {
     // Nightly only: self.subs.get(msg_type).unwrap().remove_item(actor);
-    if subs.contains_key(topic) {
-        if let Some(pos) = subs
+    if subs.contains_key(topic)
+        && let Some(pos) = subs
             .get(topic)
             .unwrap()
             .iter()
@@ -158,7 +154,6 @@ fn unsubscribe<Msg>(subs: &mut Subs<Msg>, topic: &Topic, actor: &dyn ActorRefere
         {
             subs.get_mut(topic).unwrap().remove(pos);
         }
-    }
 }
 
 /// A specialized channel that publishes messages as system messages
@@ -277,30 +272,30 @@ pub enum ChannelMsg<Msg: Message> {
 }
 
 // publish
-impl<Msg: Message> Into<ChannelMsg<Msg>> for Publish<Msg> {
-    fn into(self) -> ChannelMsg<Msg> {
-        ChannelMsg::Publish(self)
+impl<Msg: Message> From<Publish<Msg>> for ChannelMsg<Msg> {
+    fn from(val: Publish<Msg>) -> Self {
+        ChannelMsg::Publish(val)
     }
 }
 
 // subscribe
-impl<Msg: Message> Into<ChannelMsg<Msg>> for Subscribe<Msg> {
-    fn into(self) -> ChannelMsg<Msg> {
-        ChannelMsg::Subscribe(self)
+impl<Msg: Message> From<Subscribe<Msg>> for ChannelMsg<Msg> {
+    fn from(val: Subscribe<Msg>) -> Self {
+        ChannelMsg::Subscribe(val)
     }
 }
 
 // unsubscribe
-impl<Msg: Message> Into<ChannelMsg<Msg>> for Unsubscribe<Msg> {
-    fn into(self) -> ChannelMsg<Msg> {
-        ChannelMsg::Unsubscribe(self)
+impl<Msg: Message> From<Unsubscribe<Msg>> for ChannelMsg<Msg> {
+    fn from(val: Unsubscribe<Msg>) -> Self {
+        ChannelMsg::Unsubscribe(val)
     }
 }
 
 // unsubscribe
-impl<Msg: Message> Into<ChannelMsg<Msg>> for UnsubscribeAll<Msg> {
-    fn into(self) -> ChannelMsg<Msg> {
-        ChannelMsg::UnsubscribeAll(self)
+impl<Msg: Message> From<UnsubscribeAll<Msg>> for ChannelMsg<Msg> {
+    fn from(val: UnsubscribeAll<Msg>) -> Self {
+        ChannelMsg::UnsubscribeAll(val)
     }
 }
 
@@ -310,7 +305,7 @@ impl<Msg: Message> Into<ChannelMsg<Msg>> for UnsubscribeAll<Msg> {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Topic(String);
 
-impl<'a> From<&'a str> for Topic {
+impl From<&str> for Topic {
     fn from(topic: &str) -> Self {
         Topic(topic.to_string())
     }
@@ -322,7 +317,7 @@ impl From<String> for Topic {
     }
 }
 
-impl<'a> From<&'a SystemEvent> for Topic {
+impl From<&SystemEvent> for Topic {
     fn from(evt: &SystemEvent) -> Self {
         match *evt {
             SystemEvent::ActorCreated(_) => Topic::from("actor.created"),

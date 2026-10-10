@@ -38,6 +38,7 @@ where
 pub struct Entity;
 
 impl Entity {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new<Pro>(
         sys: &ActorSystem,
         instance_fact: Pro,
@@ -193,7 +194,7 @@ pub struct EntityActorConfig {
     sleep_after_secs: u64,
 }
 
-impl<'a> From<&'a Config> for EntityActorConfig {
+impl From<&Config> for EntityActorConfig {
     fn from(config: &Config) -> Self {
         EntityActorConfig {
             sleep_after_secs: config.get_int("cqrs.sleep_after_secs").unwrap() as u64,

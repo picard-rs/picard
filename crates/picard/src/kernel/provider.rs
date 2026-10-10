@@ -16,7 +16,6 @@ use crate::{
 #[derive(Clone)]
 pub struct Provider {
     inner: Arc<ProviderInner>,
-    log: LoggingSystem,
 }
 
 struct ProviderInner {
@@ -24,14 +23,13 @@ struct ProviderInner {
 }
 
 impl Provider {
-    pub fn new(log: LoggingSystem) -> Self {
+    pub fn new() -> Self {
         let inner = ProviderInner {
             paths: DashMap::new(),
         };
 
         Provider {
             inner: Arc::new(inner),
-            log,
         }
     }
 

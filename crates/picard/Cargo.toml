@@ -28,3 +28,8 @@ dashmap = "3"
 [dev-dependencies]
 picard-testkit.workspace = true
 log.workspace = true
+criterion = "0.5"
+
+[[bench]]
+name = "runtime"
+harness = false

@@ -36,7 +36,6 @@ pub struct ActorSelection {
     anchor: BasicActorRef,
     // dl: BasicActorRef,
     path_vec: Vec<Selection>,
-    path: String,
 }
 
 impl ActorSelection {
@@ -62,7 +61,6 @@ impl ActorSelection {
             anchor,
             // dl: dl.clone(),
             path_vec,
-            path,
         })
     }
 
@@ -76,7 +74,6 @@ impl ActorSelection {
             mut path_vec: Peekable<I>,
             msg: Msg,
             sender: &Sender,
-            path: &str,
         ) where
             I: Iterator<Item = &'a Selection>,
             Msg: Message,
@@ -89,7 +86,7 @@ impl ActorSelection {
                         let parent = anchor.parent();
                         let _ = parent.try_tell(msg, sender.clone());
                     } else {
-                        walk(&anchor.parent(), path_vec, msg, sender, path);
+                        walk(&anchor.parent(), path_vec, msg, sender);
                     }
                 }
                 Some(&Selection::AllChildren) => {
@@ -97,7 +94,7 @@ impl ActorSelection {
                         let _ = child.try_tell(msg.clone(), sender.clone());
                     }
                 }
-                Some(&Selection::ChildName(ref name)) => {
+                Some(Selection::ChildName(name)) => {
                     let child = anchor.children().filter(|c| c.name() == name).last();
                     if path_vec.peek().is_none() {
                         if let Some(actor_ref) = child {
@@ -105,12 +102,11 @@ impl ActorSelection {
                         }
                     } else if path_vec.peek().is_some() && child.is_some() {
                         walk(
-                            &child.as_ref().unwrap(),
+                            child.as_ref().unwrap(),
                             // dl,
                             path_vec,
                             msg,
                             sender,
-                            path,
                         );
                     } else {
                         // todo send to deadletters?
@@ -126,18 +122,15 @@ impl ActorSelection {
             self.path_vec.iter().peekable(),
             msg,
             &sender.into(),
-            &self.path,
         );
     }
 
-    pub fn sys_tell(&self, msg: SystemMsg, sender: impl Into<Option<BasicActorRef>>) {
+    pub fn sys_tell(&self, msg: SystemMsg, _sender: impl Into<Option<BasicActorRef>>) {
         fn walk<'a, I>(
             anchor: &BasicActorRef,
             // dl: &BasicActorRef,
             mut path_vec: Peekable<I>,
             msg: SystemMsg,
-            sender: &Sender,
-            path: &str,
         ) where
             I: Iterator<Item = &'a Selection>,
         {
@@ -149,7 +142,7 @@ impl ActorSelection {
                         let parent = anchor.parent();
                         parent.sys_tell(msg);
                     } else {
-                        walk(&anchor.parent(), path_vec, msg, sender, path);
+                        walk(&anchor.parent(), path_vec, msg);
                     }
                 }
                 Some(&Selection::AllChildren) => {
@@ -157,7 +150,7 @@ impl ActorSelection {
                         child.sys_tell(msg.clone());
                     }
                 }
-                Some(&Selection::ChildName(ref name)) => {
+                Some(Selection::ChildName(name)) => {
                     let child = anchor.children().filter(|c| c.name() == name).last();
                     if path_vec.peek().is_none() {
                         if let Some(actor_ref) = child {
@@ -165,12 +158,10 @@ impl ActorSelection {
                         }
                     } else if path_vec.peek().is_some() && child.is_some() {
                         walk(
-                            &child.as_ref().unwrap(),
+                            child.as_ref().unwrap(),
                             // dl,
                             path_vec,
                             msg,
-                            sender,
-                            path,
                         );
                     } else {
                         // todo send to deadletters?
@@ -185,8 +176,6 @@ impl ActorSelection {
             // &self.dl,
             self.path_vec.iter().peekable(),
             msg,
-            &sender.into(),
-            &self.path,
         );
     }
 }
