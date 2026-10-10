@@ -1,0 +1,16 @@
+[package]
+name = "picard-patterns"
+version = "0.4.2"
+description = "A collection of common actor patterns for Picard"
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+[dependencies]
+picard.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+picard-testkit.workspace = true

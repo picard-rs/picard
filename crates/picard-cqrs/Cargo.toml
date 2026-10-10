@@ -1,0 +1,18 @@
+[package]
+name = "picard-cqrs"
+version = "0.2.3"
+description = "Provides Command Query Responsibility Separation for Picard applications"
+readme = "README.md"
+keywords = ["CQRS", "event_sourcing", "actors"]
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+[dependencies]
+picard.workspace = true
+config.workspace = true
+log = { workspace = true, features = ["std"] }
+    
+[dev-dependencies]
+picard-testkit.workspace = true

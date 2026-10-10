@@ -1,0 +1,12 @@
+[package]
+name = "picard-testkit"
+version = "0.1.0"
+description = "Tools to make testing Picard applications easier"
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+[dependencies]
+chrono.workspace = true
