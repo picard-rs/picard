@@ -87,6 +87,21 @@ cargo bench -p picard --bench runtime
 The benchmark target measures typed and untyped message throughput (including
 mailbox processing), actor round-trip latency, and actor creation.
 
+## Actor Demo
+
+Run the actor efficiency demo in release mode for a more representative
+comparison:
+
+```bash
+cargo run --release -p picard --example actor_demo
+```
+
+It computes the same CPU-heavy workload once on the calling thread and once
+split across worker actors, then prints elapsed time and speedup. Actor startup
+is excluded from the timings, and the results are checked for equality. This
+illustrates how actors can improve throughput for independent, substantial
+work; message-passing overhead means smaller tasks may not be faster.
+
 ## Roadmap & Currently in Development
 
 The next major theme on the project roadmap is clustering and location transparency:
