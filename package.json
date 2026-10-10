@@ -1,5 +1,5 @@
 {
-  "name": "riker",
+  "name": "picard",
   "private": true,
   "scripts": {
     "lint": "nopenv pre-commit run -a",

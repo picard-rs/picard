@@ -1,4 +1,4 @@
-use riker::actors::*;
+use picard::actors::*;
 
 #[actor(String, u32)]
 #[derive(Clone, Default)]

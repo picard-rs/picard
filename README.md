@@ -1,17 +1,17 @@
-# Riker
+# Picard
 
-[![Build status](https://github.com/riker-rs/riker/workflows/Build%20and%20run%20tests/badge.svg)](https://github.com/riker-rs/riker/actions?query=workflow%3A%22Build+and+run+tests%22)
+[![Build status](https://github.com/picard-rs/picard/workflows/Build%20and%20run%20tests/badge.svg)](https://github.com/picard-rs/picard/actions?query=workflow%3A%22Build+and+run+tests%22)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![crates.io](https://meritbadge.herokuapp.com/riker)](https://crates.io/crates/riker)
-[![Released API docs](https://docs.rs/riker/badge.svg)](https://docs.rs/riker)
+[![crates.io](https://meritbadge.herokuapp.com/picard)](https://crates.io/crates/picard)
+[![Released API docs](https://docs.rs/picard/badge.svg)](https://docs.rs/picard)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
 
 ## Overview
 
-Riker is a framework for building modern, concurrent and resilient systems using the Rust language. Riker aims to make working with state and behavior in concurrent systems as easy and scalable as possible. The Actor Model has been chosen to realize this because of the familiar and inherent simplicity it provides while also providing strong guarantees that are easy to reason about. The Actor Model also provides a firm foundation for resilient systems through the use of the actor hierarchy and actor supervision.
+Picard is a framework for building modern, concurrent and resilient systems using the Rust language. Picard aims to make working with state and behavior in concurrent systems as easy and scalable as possible. The Actor Model has been chosen to realize this because of the familiar and inherent simplicity it provides while also providing strong guarantees that are easy to reason about. The Actor Model also provides a firm foundation for resilient systems through the use of the actor hierarchy and actor supervision.
 
-Riker provides:
+Picard provides:
 
 - An Actor based execution runtime
 - Actor supervision to isolate and recover from failures
@@ -23,7 +23,7 @@ Riker provides:
 - Command Query Responsibility Segregation (CQRS)
 - Easily run futures
 
-[Website](https://riker.rs) | [API Docs](https://docs.rs/riker)
+[Website](https://picard.rs) | [API Docs](https://docs.rs/picard)
 
 ## Example
 
@@ -31,14 +31,14 @@ Riker provides:
 
 ```toml
 [dependencies]
-riker = "0.4.1"
+picard = "0.4.1"
 ```
 
 `main.rs`:
 
 ```rust
 use std::time::Duration;
-use riker::actors::*;
+use picard::actors::*;
 
 #[derive(Default)]
 struct MyActor;
@@ -72,9 +72,9 @@ fn main() {
 
 Official crates that provide additional functionality:
 
-- [riker-cqrs](https://github.com/riker-rs/riker-cqrs): Command Query Responsibility Separation support
-- [riker-testkit](https://github.com/riker-rs/riker-testkit): Tools to make testing easier
-- [riker-patterns](https://github.com/riker-rs/riker-patterns): Common actor patterns, including `transform!` and 'ask'
+- [picard-cqrs](https://github.com/picard-rs/picard-cqrs): Command Query Responsibility Separation support
+- [picard-testkit](https://github.com/picard-rs/picard-testkit): Tools to make testing easier
+- [picard-patterns](https://github.com/picard-rs/picard-patterns): Common actor patterns, including `transform!` and 'ask'
 
 ## Roadmap & Currently in Development
 
@@ -85,28 +85,27 @@ The next major theme on the project roadmap is clustering and location transpare
 - Clustering (using vector clocks)
 - Distributed data (CRDTs)
 
-## Why Riker
+## Why Picard
 
-Riker is a full-featured actor model implementation that scales to hundreds or thousands of microservices and that equally can run exceptionally well on resource limited hardware to drive drones, IoT and robotics. The Rust language makes this possible.
+Picard is a full-featured actor model implementation that scales to hundreds or thousands of microservices and that equally can run exceptionally well on resource limited hardware to drive drones, IoT and robotics. The Rust language makes this possible.
 
 Rust empowers developers with control over memory management, requiring no garbage collection and runtime overhead, while also providing modern semantics and expressive syntax such as the trait system. The result is a language that can solve problems equally for Web and IoT.
 
-Riker adds to this by providing a familiar actor model API which in turn makes concurrent, resilient systems programming easy.
+Picard adds to this by providing a familiar actor model API which in turn makes concurrent, resilient systems programming easy.
 
 ## Rust Version
 
-Riker is currently built using the **latest Rust Nightly**.
+Picard is currently built using the **latest Rust Nightly**.
 
 ## Contributing
 
-Riker is looking for contributors - join the project! You don't need to be an expert in actors, concurrent systems, or even Rust. Great ideas come from everyone.
+Picard is looking for contributors - join the project! You don't need to be an expert in actors, concurrent systems, or even Rust. Great ideas come from everyone.
 
 There are multiple ways to contribute:
 
-- Ask questions. Adding to the conversation is a great way to contribute. Find us on [Gitter](https://gitter.im/riker-rs/Lobby).
 - Documentation. Our aim is to make concurrent, resilient systems programming available to everyone and that starts with great Documentation.
-- Additions to Riker code base. Whether small or big, your Pull Request could make a difference.
-- Patterns, data storage and other supporting crates. We are happy to link to and provide full credit to external projects that provide support for databases in Riker's event storage model or implementations of common actor patterns.
+- Additions to Picard code base. Whether small or big, your Pull Request could make a difference.
+- Patterns, data storage and other supporting crates. We are happy to link to and provide full credit to external projects that provide support for databases in Picard's event storage model or implementations of common actor patterns.
 
 ### pre-commit
 

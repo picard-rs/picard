@@ -1,10 +1,7 @@
-#[macro_use]
-extern crate riker_testkit;
+use picard::actors::*;
 
-use riker::actors::*;
-
-use riker_testkit::probe::channel::{probe, ChannelProbe};
-use riker_testkit::probe::{Probe, ProbeReceive};
+use picard_testkit::probe::channel::{probe, ChannelProbe};
+use picard_testkit::probe::{Probe, ProbeReceive};
 
 use chrono::{Duration as CDuration, Utc};
 use std::time::Duration;

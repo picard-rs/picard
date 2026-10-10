@@ -1,4 +1,4 @@
-files: "^(riker-macros/.*|config/.*|src/.*|tests/.*|examples/.*|[^/]*)$"
+files: "^(picard-macros/.*|config/.*|src/.*|tests/.*|examples/.*|[^/]*)$"
 repos:
   - repo: local
     hooks:

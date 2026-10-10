@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::actor::BasicActorRef;
 
-// Public riker::system API (plus the pub data types in this file)
+// Public picard::system API (plus the pub data types in this file)
 pub use self::timer::{BasicTimer, ScheduleId, Timer};
 
 #[derive(Clone, Debug)]
@@ -186,7 +186,7 @@ impl SystemBuilder {
     }
 
     pub fn create(self) -> Result<ActorSystem, SystemError> {
-        let name = self.name.unwrap_or_else(|| "riker".to_string());
+        let name = self.name.unwrap_or_else(|| "picard".to_string());
         let cfg = self.cfg.unwrap_or_else(load_config);
         let exec = self.exec.unwrap_or_else(|| default_exec(&cfg));
         let log = self
@@ -256,7 +256,7 @@ impl Deref for LoggingSystem {
 ///
 /// The `ActorSystem` provides a runtime on which actors are executed.
 /// It also provides common services such as channels and scheduling.
-/// The `ActorSystem` is the heart of a Riker application,
+/// The `ActorSystem` is the heart of a Picard application,
 /// starting several threads when it is created. Create only one instance
 /// of `ActorSystem` per application.
 #[allow(dead_code)]
@@ -281,7 +281,7 @@ impl ActorSystem {
         let exec = default_exec(&cfg);
         let log = default_log(&cfg);
 
-        ActorSystem::create("riker", exec, log, cfg)
+        ActorSystem::create("picard", exec, log, cfg)
     }
 
     /// Create a new `ActorSystem` instance with provided name

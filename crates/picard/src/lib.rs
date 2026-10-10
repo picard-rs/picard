@@ -1,4 +1,4 @@
-#![crate_name = "riker"]
+#![crate_name = "picard"]
 #![deny(clippy::all)]
 // #![deny(clippy::pedantic)]
 // #![deny(clippy::nursery)]
@@ -36,8 +36,8 @@ pub fn load_config() -> Config {
     cfg.set_default("scheduler.frequency_millis", 50).unwrap();
 
     // load the system config
-    // riker.toml contains settings for anything related to the actor framework and its modules
-    let path = env::var("RIKER_CONF").unwrap_or_else(|_| "config/riker.toml".into());
+    // picard.toml contains settings for anything related to the actor framework and its modules
+    let path = env::var("PICARD_CONF").unwrap_or_else(|_| "config/picard.toml".into());
     cfg.merge(File::with_name(&path).required(false)).unwrap();
 
     // load the user application config

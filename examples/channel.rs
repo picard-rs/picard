@@ -1,7 +1,7 @@
-extern crate riker;
-use riker::actors::*;
+extern crate picard;
+use picard::actors::*;
 
-use riker::system::ActorSystem;
+use picard::system::ActorSystem;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]

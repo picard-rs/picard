@@ -1,5 +1,5 @@
-extern crate riker;
-use riker::actors::*;
+extern crate picard;
+use picard::actors::*;
 
 use std::time::Duration;
 
