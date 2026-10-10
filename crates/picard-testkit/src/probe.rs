@@ -1,8 +1,7 @@
-
 pub trait Probe {
     type Msg: Send;
     type Pay: Clone + Send;
-    
+
     fn event(&self, evt: Self::Msg);
     fn payload(&self) -> &Self::Pay;
 }
@@ -23,24 +22,26 @@ pub mod channel {
     use super::{Probe, ProbeReceive};
 
     use chrono::prelude::*;
-    use std::sync::mpsc::{channel, Sender, Receiver};
+    use std::sync::mpsc::{channel, Receiver, Sender};
 
     pub fn probe<T: Send>() -> (ChannelProbe<(), T>, ChannelProbeReceive<T>) {
         probe_with_payload(())
     }
 
-    pub fn probe_with_payload<P: Clone + Send, T: Send>(payload: P) -> (ChannelProbe<P, T>, ChannelProbeReceive<T>) {
+    pub fn probe_with_payload<P: Clone + Send, T: Send>(
+        payload: P,
+    ) -> (ChannelProbe<P, T>, ChannelProbeReceive<T>) {
         let (tx, rx) = channel::<T>();
 
         let probe = ChannelProbe {
             payload: Some(payload),
-            tx: tx.clone()
+            tx: tx.clone(),
         };
 
         let receiver = ChannelProbeReceive {
             rx: rx,
             tx: tx,
-            timer_start: Utc::now()
+            timer_start: Utc::now(),
         };
 
         (probe, receiver)
@@ -52,32 +53,38 @@ pub mod channel {
         tx: Sender<T>,
     }
 
-    impl<P, T> Probe for ChannelProbe<P, T> 
-        where P: Clone + Send, T: Send {
-            type Msg = T;
-            type Pay = P;
+    impl<P, T> Probe for ChannelProbe<P, T>
+    where
+        P: Clone + Send,
+        T: Send,
+    {
+        type Msg = T;
+        type Pay = P;
 
-            fn event(&self, evt: T) {
-                drop(self.tx.send(evt));
-            }
+        fn event(&self, evt: T) {
+            drop(self.tx.send(evt));
+        }
 
-            fn payload(&self) -> &P {
-                &self.payload.as_ref().unwrap()
-            }
+        fn payload(&self) -> &P {
+            &self.payload.as_ref().unwrap()
+        }
     }
 
     impl<P, T> Probe for Option<ChannelProbe<P, T>>
-        where P: Clone + Send, T: Send {
-            type Msg = T;
-            type Pay = P;
+    where
+        P: Clone + Send,
+        T: Send,
+    {
+        type Msg = T;
+        type Pay = P;
 
-            fn event(&self, evt: T) {
-                drop(self.as_ref().unwrap().tx.send(evt));
-            }
+        fn event(&self, evt: T) {
+            drop(self.as_ref().unwrap().tx.send(evt));
+        }
 
-            fn payload(&self) -> &P {
-                &self.as_ref().unwrap().payload.as_ref().unwrap()
-            }
+        fn payload(&self) -> &P {
+            &self.as_ref().unwrap().payload.as_ref().unwrap()
+        }
     }
 
     #[allow(dead_code)]
@@ -100,20 +107,24 @@ pub mod channel {
 
         fn last_event_milliseconds(&self) -> u64 {
             let now = Utc::now();
-            now.time().signed_duration_since(self.timer_start.time()).num_milliseconds() as u64
+            now.time()
+                .signed_duration_since(self.timer_start.time())
+                .num_milliseconds() as u64
         }
 
         fn last_event_seconds(&self) -> u64 {
             let now = Utc::now();
-            now.time().signed_duration_since(self.timer_start.time()).num_seconds() as u64
+            now.time()
+                .signed_duration_since(self.timer_start.time())
+                .num_seconds() as u64
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Probe, ProbeReceive};
     use super::channel::{probe, probe_with_payload};
+    use super::{Probe, ProbeReceive};
     use std::thread;
 
     #[test]
@@ -135,17 +146,15 @@ mod tests {
         thread::spawn(move || {
             // only event the expected result if the payload is what we expect
             if probe.payload() == "test data" {
-                probe.event("data received");                
+                probe.event("data received");
             } else {
-                probe.event("");            
+                probe.event("");
             }
-            
         });
 
         assert_eq!(listen.recv(), "data received");
     }
 }
-
 
 /// Macros that provide easy use of Probes
 pub mod macros {
@@ -166,7 +175,7 @@ pub mod macros {
     macro_rules! p_assert_events {
         ($listen:expr, $expected:expr) => {
             let mut expected = $expected.clone(); // so we don't need the original mutable
-            
+
             loop {
                 match expected.iter().position(|x| x == &$listen.recv()) {
                     Some(pos) => {
@@ -193,15 +202,15 @@ pub mod macros {
 
     #[cfg(test)]
     mod tests {
-        use crate::probe::{Probe, ProbeReceive};
         use crate::probe::channel::probe;
+        use crate::probe::{Probe, ProbeReceive};
 
         #[test]
         fn p_assert_eq() {
             let (probe, listen) = probe();
 
             probe.event("test".to_string());
-            
+
             p_assert_eq!(listen, "test".to_string());
         }
 
@@ -213,7 +222,7 @@ pub mod macros {
             probe.event("event_1");
             probe.event("event_2");
             probe.event("event_3");
-            
+
             p_assert_events!(listen, expected);
         }
 
@@ -221,9 +230,8 @@ pub mod macros {
         fn p_timer() {
             let (probe, listen) = probe();
             probe.event("event_3");
-            
+
             println!("Milliseconds: {}", p_timer!(listen));
         }
-
     }
 }
