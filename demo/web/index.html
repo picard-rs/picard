@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Living City · Picard actor showcase</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#0b0f17;--panel:#111826;--panel2:#161f31;--line:#243049;--fg:#d7e0f0;--dim:#7f8da8;--accent:#4cc2ff;--ok:#3ddc97;--warn:#ffc857;--bad:#ff5d6c;--app:#b388ff}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+body{display:grid;grid-template-columns:270px 1fr 340px;grid-template-rows:44px 1fr 190px;grid-template-areas:"top top top" "left main right" "left charts right";height:100vh}
+header{grid-area:top;display:flex;align-items:center;gap:12px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:15px;margin:0;letter-spacing:.3px}
+header .sub{color:var(--dim)}
+#conn{margin-left:auto;font-size:12px;padding:2px 8px;border-radius:10px;background:#2a1a1f;color:var(--bad)}
+#conn.on{background:#12281f;color:var(--ok)}
+aside{background:var(--panel);overflow-y:auto;padding:10px 12px}
+#left{grid-area:left;border-right:1px solid var(--line)}
+#right{grid-area:right;border-left:1px solid var(--line)}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);margin:14px 0 6px}
+h2:first-child{margin-top:2px}
+button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 9px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:#12476a;border-color:#2b86bd}
+button.danger{background:#4a1e27;border-color:#8a3340}
+button.on{border-color:var(--accent);color:var(--accent)}
+button:disabled{opacity:.4;cursor:default}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+.stat{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dotted #1d2840}
+.stat b{font-variant-numeric:tabular-nums}
+.tag{font-size:9px;padding:0 4px;border-radius:3px;margin-left:5px;vertical-align:middle}
+.tag.rt{background:#10382c;color:var(--ok)}
+.tag.app{background:#2b2147;color:var(--app)}
+#main{grid-area:main;position:relative;min-height:0}
+canvas{display:block;width:100%;height:100%}
+#charts{grid-area:charts;background:var(--panel);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);gap:1px}
+.chart{position:relative;padding:4px 8px}
+.chart canvas{position:absolute;inset:18px 6px 4px 6px;width:calc(100% - 12px);height:calc(100% - 22px)}
+.chart .t{font-size:11px;color:var(--dim);position:relative}
+.chart .t b{color:var(--fg)}
+#districts{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.dist{border:1px solid var(--line);border-radius:6px;padding:4px 6px;background:var(--panel2);cursor:pointer}
+.dist.active{border-color:#2b86bd}
+.dist small{color:var(--dim)}
+#hud{position:absolute;left:10px;bottom:10px;background:#0b0f17cc;border:1px solid var(--line);border-radius:6px;padding:6px 8px;color:var(--dim);font-size:11px;pointer-events:none}
+#legend{position:absolute;right:10px;top:10px;background:#0b0f17cc;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:11px}
+#legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 4px 0 8px;vertical-align:-1px}
+#legend i:first-child{margin-left:0}
+#tip{position:fixed;pointer-events:none;background:#000d;border:1px solid var(--line);border-radius:4px;padding:3px 6px;font-size:11px;display:none;z-index:9}
+table{width:100%;border-collapse:collapse;font-size:11px}
+td,th{padding:2px 3px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:500}
+tr.new td{background:#17324a}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:1px 10px}
+.kv span:nth-child(odd){color:var(--dim)}
+#tour{position:fixed;left:50%;top:60px;transform:translateX(-50%);width:520px;background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:14px 16px;z-index:10;display:none;box-shadow:0 12px 40px #000a}
+#tour h3{margin:0 0 6px}
+#tour .nav{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+.note{color:var(--dim);font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Living City</h1><span class="sub">every car, junction, light and district is a Picard actor</span>
+  <button id="pause" title="Pause or resume the simulation clock (actors stay alive)">Pause</button>
+  <button id="reset" title="Stop all vehicles and respawn the initial city">Reset</button>
+  <button id="tourbtn" class="primary" title="Guided walk through the main ideas">Demo Tour</button>
+  <span id="conn">offline</span>
+</header>
+
+<aside id="left">
+  <h2>Scenario A · Concurrency</h2>
+  <div class="row" id="counts"></div>
+  <div class="note" style="margin-top:4px">Target vehicles, split across active districts. Spawned in batches so the UI never blocks.</div>
+  <h2>Scenario D · Surge</h2>
+  <div class="row"><button id="surge" class="danger" title="Spawn 800 vehicles that all head for the centre of the selected district">Surge in selected district</button></div>
+  <h2>Scenario E · Districts</h2>
+  <div id="districts"></div>
+  <div class="note" style="margin-top:4px">Click a district to select it. Add or remove it at runtime: its whole actor subtree is created or stopped.</div>
+  <div class="row" style="margin-top:6px"><button id="adddist">Add selected</button><button id="rmdist" class="danger">Remove selected</button></div>
+  <h2>Metrics</h2>
+  <div class="note" style="margin-bottom:4px"><span class="tag rt" style="margin:0">runtime</span> from Picard events or the OS · <span class="tag app" style="margin:0">app</span> counted by the demo</div>
+  <div id="stats"></div>
+  <h2>About the data</h2>
+  <div class="note">Mailbox depth is not exposed by Picard, so it is not shown. Tick delay is the real time a tick message spends between being sent and handled by a sampled vehicle (about 1 in 16). CPU and memory come from <code>/proc</code>.</div>
+</aside>
+
+<div id="main">
+  <canvas id="city"></canvas>
+  <div id="legend"><i style="background:#3ddc97"></i>moving<i style="background:#ffc857"></i>waiting<i style="background:#4cc2ff"></i>crossing<i style="background:#7f8da8"></i>parked</div>
+  <div id="hud">scroll to zoom · drag to pan · double-click to reset view · click a vehicle or junction to inspect</div>
+</div>
+
+<aside id="right">
+  <h2>Actor inspector</h2>
+  <div id="insp"><div class="note">Click a vehicle or a junction on the map.</div></div>
+</aside>
+
+<div id="charts">
+  <div class="chart"><div class="t">Messages processed/s <b id="c1v"></b> <span class="tag app">app</span></div><canvas id="ch1"></canvas></div>
+  <div class="chart"><div class="t">Tick delay mean / p95 µs <b id="c2v"></b> <span class="tag app">sampled</span></div><canvas id="ch2"></canvas></div>
+  <div class="chart"><div class="t">Trips/s · % waiting <b id="c3v"></b> <span class="tag app">app</span></div><canvas id="ch3"></canvas></div>
+  <div class="chart"><div class="t">CPU % · memory MB <b id="c4v"></b> <span class="tag rt">process</span></div><canvas id="ch4"></canvas></div>
+</div>
+
+<div id="tip"></div>
+<div id="tour"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cvs = $("city"), ctx = cvs.getContext("2d");
+let hello = null, ws = null, last = null, lastAt = 0, prevAt = 0;
+const veh = new Map();
+let juncs = new Map();
+let activeDistricts = new Map();
+let selectedDistrict = 0, selected = null, inspect = null, inspectAt = 0;
+const cam = {x: 0, y: 0, z: 1};
+let fitted = false, paused = false;
+const hist = {msgs: [], dmean: [], dp95: [], trips: [], cong: [], cpu: [], rss: [], lastUptime: -1};
+const HIST = 120;
+const STATE_COLORS = ["#3ddc97", "#ffc857", "#4cc2ff", "#7f8da8"];
+const STATE_NAMES = ["moving", "waiting", "crossing", "parked"];
+const COUNTS = [100, 1000, 5000, 10000];
+
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+function connect() {
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onopen = () => { $("conn").textContent = "live"; $("conn").className = "on"; if (selected) send({cmd: "select", id: selected.id}); };
+  ws.onclose = () => { $("conn").textContent = "offline"; $("conn").className = ""; setTimeout(connect, 1000); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.hello) { hello = m.hello; buildDistricts(); return; }
+    if (m.districts) onFrame(m);
+  };
+}
+
+function worldToScreen(x, y) { return [(x * 40 + 40 - cam.x) * cam.z, (y * 40 + 40 - cam.y) * cam.z]; }
+function screenToWorld(sx, sy) { return [(sx / cam.z + cam.x - 40) / 40, (sy / cam.z + cam.y - 40) / 40]; }
+
+function onFrame(m) {
+  prevAt = lastAt; lastAt = performance.now();
+  last = m; paused = m.paused;
+  $("pause").textContent = paused ? "Resume" : "Pause";
+  $("pause").classList.toggle("on", paused);
+  const seen = new Set();
+  juncs = new Map();
+  activeDistricts = new Map();
+  let total = 0, waiting = 0;
+  for (const d of m.districts) {
+    activeDistricts.set(d.d, {target: d.target, handled: d.handled, count: d.v.length});
+    total += d.v.length;
+    for (const j of d.j) juncs.set(j[0] + "," + j[1], j);
+    for (const v of d.v) {
+      const id = v[0], s = v[5] / 1000;
+      const nx = v[1] + (v[3] - v[1]) * s, ny = v[2] + (v[4] - v[2]) * s;
+      let o = veh.get(id);
+      if (!o) { o = {px: nx, py: ny, nx, ny, state: v[6]}; veh.set(id, o); }
+      else { o.px = o.dispX !== undefined ? o.dispX : o.nx; o.py = o.dispY !== undefined ? o.dispY : o.ny; o.nx = nx; o.ny = ny; o.state = v[6]; }
+      seen.add(id);
+      if (v[6] === 1) waiting++;
+    }
+  }
+  for (const id of veh.keys()) if (!seen.has(id)) veh.delete(id);
+  m._total = total; m._waiting = waiting;
+  updateMetrics(m);
+  if (m.inspect) { inspect = m.inspect; inspectAt = performance.now(); renderInspector(); }
+  else if (selected && performance.now() - inspectAt > 2500) renderInspector();
+  renderDistricts();
+}
+
+function fmt(n, d = 0) { return Number(n).toLocaleString(undefined, {maximumFractionDigits: d}); }
+function updateMetrics(m) {
+  const x = m.m, tag = k => `<span class="tag ${k}">${k === "rt" ? "runtime" : "app"}</span>`;
+  const rows = [
+    ["Vehicles", fmt(m._total) + " / " + fmt(m.target), "app"],
+    ["Active actors", fmt(x.actors), "app"],
+    ["Terminated", fmt(x.terminated), "rt"],
+    ["Created", fmt(x.created), "app"],
+    ["Restarts", fmt(x.restarted), "rt"],
+    ["Dead letters", fmt(x.dead_letters), "rt"],
+    ["Messages sent/s", fmt(x.sent), "app"],
+    ["Messages processed/s", fmt(x.processed), "app"],
+    ["Tick delay mean / p95", fmt(x.delay_mean) + " / " + fmt(x.delay_p95) + " µs", "app"],
+    ["Handler mean / p95", fmt(x.handler_mean) + " / " + fmt(x.handler_p95) + " µs", "app"],
+    ["Simulation ticks/s", fmt(x.ticks, 1) + " (target 20)", "app"],
+    ["Trips completed", fmt(x.trips) + " (" + fmt(x.trips_rate, 1) + "/s)", "app"],
+    ["Grants / denies per s", fmt(x.grants) + " / " + fmt(x.denies), "app"],
+    ["Retries / reroutes", fmt(x.retries) + " / " + fmt(x.reroutes), "app"],
+    ["Safety violations", fmt(x.violations), "app"],
+    ["CPU / memory", fmt(x.cpu) + "% / " + fmt(x.rss) + " MB", "rt"],
+  ];
+  $("stats").innerHTML = rows.map(r => `<div class="stat"><span>${r[0]}${tag(r[2])}</span><b>${r[1]}</b></div>`).join("");
+  const push = (a, v) => { a.push(v); if (a.length > HIST) a.shift(); };
+  if (x.uptime !== hist.lastUptime) {
+    hist.lastUptime = x.uptime;
+    push(hist.msgs, x.processed); push(hist.dmean, x.delay_mean); push(hist.dp95, x.delay_p95);
+    push(hist.trips, x.trips_rate); push(hist.cong, m._total ? m._waiting / m._total * 100 : 0);
+    push(hist.cpu, x.cpu); push(hist.rss, x.rss);
+  }
+}
+
+function buildDistricts() {
+  const box = $("districts"); box.innerHTML = "";
+  hello.names.forEach((name, d) => {
+    const el = document.createElement("div"); el.className = "dist"; el.id = "d" + d;
+    el.onclick = () => { selectedDistrict = d; renderDistricts(); };
+    box.appendChild(el);
+  });
+}
+function renderDistricts() {
+  if (!hello) return;
+  hello.names.forEach((name, d) => {
+    const el = $("d" + d), a = activeDistricts.get(d);
+    el.classList.toggle("active", !!a);
+    el.style.outline = d === selectedDistrict ? "2px solid var(--accent)" : "none";
+    el.innerHTML = `<b>${name}</b><br><small>${a ? fmt(a.count) + " cars · " + fmt(a.handled) + " msgs" : "inactive"}</small>`;
+  });
+  $("adddist").disabled = activeDistricts.has(selectedDistrict);
+  $("rmdist").disabled = !activeDistricts.has(selectedDistrict) || activeDistricts.size < 2;
+  $("surge").disabled = !activeDistricts.has(selectedDistrict);
+}
+
+/* ---------- inspector ---------- */
+function kindColor(k) { return {RequestIntersectionEntry: "#4cc2ff", EntryGranted: "#3ddc97", EntryDenied: "#ff5d6c", TrafficSignalChanged: "#ffc857", VehicleExitedIntersection: "#b388ff"}[k] || "var(--fg)"; }
+let shownTimes = new Set();
+function renderInspector() {
+  const el = $("insp");
+  if (!selected) { el.innerHTML = '<div class="note">Click a vehicle or a junction on the map.</div>'; return; }
+  const stale = performance.now() - inspectAt > 2500;
+  const i = inspect && inspect.id === selected.id ? inspect : null;
+  if (!i || stale) {
+    el.innerHTML = `<b>${selected.id}</b><div class="note">${stale ? "No reply from this actor. It was stopped (fault injected) or is not running." : "Waiting for reply…"}</div>` + killButtons();
+    return;
+  }
+  const details = Object.entries(i.details || {}).map(([k, v]) => `<span>${k}</span><span>${Array.isArray(v) ? v.map(n => typeof n === "number" ? +n.toFixed(2) : n).join(", ") : v}</span>`).join("");
+  const recent = i.trace.recent || [];
+  const rows = recent.slice(0, 30).map(r => {
+    const fresh = !shownTimes.has(r.t);
+    return `<tr class="${fresh ? "new" : ""}"><td>${(r.t / 1000).toFixed(1)}s</td><td>${r.from}</td><td>${r.to}</td><td style="color:${kindColor(r.kind)}">${r.kind}</td></tr>`;
+  }).join("");
+  recent.forEach(r => shownTimes.add(r.t));
+  if (shownTimes.size > 400) shownTimes = new Set();
+  el.innerHTML = `
+    <div style="font-size:15px"><b>${i.id}</b> <span class="note">${i.type}</span></div>
+    <div class="kv" style="margin-top:6px">
+      <span>state</span><span>${i.state}</span>
+      <span>lifecycle</span><span style="color:var(--ok)">${i.lifecycle}</span>
+      <span>actor path</span><span style="word-break:break-all">${i.path}</span>
+      <span>age</span><span>${fmt(i.age_s, 1)} s (sim)</span>
+      <span>sent / received</span><span>${fmt(i.trace.sent)} / ${fmt(i.trace.received)}</span>
+      <span>mailbox depth</span><span class="note">not exposed by Picard</span>
+      ${details}
+    </div>
+    ${killButtons()}
+    <h2>Message timeline</h2>
+    <div class="note">Recorded while this actor is selected. Newest first.</div>
+    <table><tr><th>t</th><th>from</th><th>to</th><th>message</th></tr>${rows || '<tr><td colspan="4" class="note">waiting for traffic…</td></tr>'}</table>`;
+}
+function killButtons() {
+  return `<div class="row" style="margin-top:8px">
+    <button class="danger" onclick="kill('terminate')" title="The actor stops itself. Nothing restarts it.">Kill actor</button>
+    <button class="danger" onclick="kill('crash')" title="The actor panics. Its parent's supervisor strategy (Restart) decides what happens.">Crash actor</button></div>`;
+}
+function kill(mode) { if (selected) send({cmd: "kill", id: selected.id, mode}); }
+function select(id) { selected = id ? {id} : null; inspect = null; inspectAt = performance.now(); shownTimes = new Set(); send({cmd: "select", id: id || null}); renderInspector(); }
+
+/* ---------- canvas ---------- */
+function resize() {
+  const r = cvs.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  cvs.width = r.width * dpr; cvs.height = r.height * dpr;
+}
+function fit() {
+  const n = hello.block * hello.grid, r = cvs.getBoundingClientRect();
+  cam.z = Math.min(r.width, r.height) / (n * 40 + 40); cam.x = 0; cam.y = 0; fitted = true;
+}
+addEventListener("resize", resize);
+
+function signalColor(j, axis) {
+  if (j[2] !== axis) return "#ff5d6c";
+  return j[3] ? "#ffc857" : "#3ddc97";
+}
+
+function draw(now) {
+  requestAnimationFrame(draw);
+  if (!hello) return;
+  if (!fitted) fit();
+  const dpr = devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+  const z = cam.z, T = worldToScreen;
+
+  const b = hello.block;
+  for (let d = 0; d < hello.names.length; d++) {
+    const dx = (d % hello.grid) * b, dy = Math.floor(d / hello.grid) * b;
+    const [sx, sy] = T(dx - .5, dy - .5), sz = b * 40 * z;
+    const a = activeDistricts.has(d);
+    ctx.fillStyle = a ? (d === selectedDistrict ? "#13233a" : "#0f1828") : "#0b0f17";
+    ctx.fillRect(sx, sy, sz, sz);
+    ctx.strokeStyle = d === selectedDistrict ? "#2b86bd" : "#1b2740"; ctx.lineWidth = 1; ctx.strokeRect(sx, sy, sz, sz);
+    ctx.fillStyle = a ? "#33466a" : "#1d2840"; ctx.font = `${Math.max(10, 14 * z)}px system-ui`;
+    ctx.fillText(hello.names[d].toUpperCase() + (a ? "" : " (inactive)"), sx + 6, sy + 16 * Math.max(z, .7));
+  }
+  ctx.strokeStyle = "#1f2c47"; ctx.lineWidth = Math.max(2, 8 * z); ctx.lineCap = "round";
+  ctx.beginPath();
+  for (const j of juncs.values()) {
+    const x = j[0], y = j[1];
+    for (const [ox, oy] of [[1, 0], [0, 1]]) if (juncs.has((x + ox) + "," + (y + oy))) {
+      const a = T(x, y), c = T(x + ox, y + oy); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]);
+    }
+  }
+  ctx.stroke();
+  for (const j of juncs.values()) {
+    const [sx, sy] = T(j[0], j[1]), q = j[4] + j[5], r = Math.max(3, 8 * z);
+    if (q > 0) {
+      ctx.fillStyle = `rgba(255,93,108,${Math.min(.55, .12 + q * .06)})`;
+      ctx.beginPath(); ctx.arc(sx, sy, r * (1.6 + Math.min(q, 10) * .12), 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = "#0b0f17"; ctx.fillRect(sx - r, sy - r, 2 * r, 2 * r);
+    const bar = Math.max(1.5, 2.2 * z);
+    ctx.fillStyle = signalColor(j, 1); ctx.fillRect(sx - r, sy - r - bar, 2 * r, bar); ctx.fillRect(sx - r, sy + r, 2 * r, bar);
+    ctx.fillStyle = signalColor(j, 2); ctx.fillRect(sx - r - bar, sy - r, bar, 2 * r); ctx.fillRect(sx + r, sy - r, bar, 2 * r);
+    if (j[7]) { ctx.strokeStyle = "#ffc857"; ctx.lineWidth = 1; ctx.strokeRect(sx - r - 3, sy - r - 3, 2 * r + 6, 2 * r + 6); }
+    if (selected && selected.id === `i-${j[0]}-${j[1]}`) { ctx.strokeStyle = "#4cc2ff"; ctx.lineWidth = 2; ctx.strokeRect(sx - r - 5, sy - r - 5, 2 * r + 10, 2 * r + 10); }
+  }
+  const span = Math.max(60, Math.min(250, lastAt - prevAt || 100));
+  const f = Math.min(1, (now - lastAt) / span);
+  const vr = Math.max(1.3, 2.6 * z);
+  let selPos = null;
+  for (const [id, o] of veh) {
+    const x = o.px + (o.nx - o.px) * f, y = o.py + (o.ny - o.py) * f;
+    o.dispX = x; o.dispY = y;
+    const [sx, sy] = T(x, y);
+    ctx.fillStyle = STATE_COLORS[o.state] || "#fff";
+    ctx.fillRect(sx - vr, sy - vr, vr * 2, vr * 2);
+    if (selected && selected.id === "v-" + id) selPos = [sx, sy];
+  }
+  if (selPos) {
+    ctx.strokeStyle = "#4cc2ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(selPos[0], selPos[1], 9, 0, 7); ctx.stroke();
+    drawPulse(selPos, now);
+  }
+  if (hoverId !== null && veh.has(hoverId)) {
+    const o = veh.get(hoverId), [sx, sy] = T(o.dispX, o.dispY);
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(sx, sy, 7, 0, 7); ctx.stroke();
+  }
+}
+
+// Dashed link from the selected vehicle to the junction it talks to, with a dot for the newest message.
+let pulseKey = "", pulseAt = 0;
+function drawPulse(sel, now) {
+  if (!inspect || inspect.id !== selected.id || !inspect.details) return;
+  const m = /^i-(\d+)-(\d+)$/.exec(inspect.details.heading_to || ""); if (!m) return;
+  const [tx, ty] = worldToScreen(+m[1], +m[2]);
+  ctx.setLineDash([4, 4]); ctx.strokeStyle = "#4cc2ff88"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(sel[0], sel[1]); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]);
+  const recent = (inspect.trace.recent || [])[0];
+  if (!recent) return;
+  const key = recent.t + recent.kind;
+  if (key !== pulseKey) { pulseKey = key; pulseAt = now; }
+  const p = Math.min(1, (now - pulseAt) / 600);
+  if (p >= 1) return;
+  const t = recent.from === inspect.id ? p : 1 - p;
+  ctx.fillStyle = kindColor(recent.kind); ctx.beginPath();
+  ctx.arc(sel[0] + (tx - sel[0]) * t, sel[1] + (ty - sel[1]) * t, 5, 0, 7); ctx.fill();
+}
+
+let hoverId = null, drag = null;
+function pick(mx, my) {
+  const [wx, wy] = screenToWorld(mx, my), tol = Math.max(.25, 8 / (40 * cam.z));
+  let best = null, bd = tol * tol;
+  for (const [id, o] of veh) {
+    const dx = (o.dispX ?? o.nx) - wx, dy = (o.dispY ?? o.ny) - wy, d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = {kind: "v", id}; }
+  }
+  if (best) return best;
+  const gx = Math.round(wx), gy = Math.round(wy), j = juncs.get(gx + "," + gy);
+  if (j && Math.hypot(gx - wx, gy - wy) < .3) return {kind: "i", x: gx, y: gy, j};
+  return null;
+}
+cvs.addEventListener("mousedown", e => { drag = {x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false}; });
+addEventListener("mouseup", e => {
+  if (drag && !drag.moved && e.target === cvs) {
+    const r = cvs.getBoundingClientRect(), p = pick(e.clientX - r.left, e.clientY - r.top);
+    if (p) select(p.kind === "v" ? "v-" + p.id : `i-${p.x}-${p.y}`);
+  }
+  drag = null;
+});
+addEventListener("mousemove", e => {
+  const r = cvs.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (drag) {
+    if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) drag.moved = true;
+    if (drag.moved) { cam.x = drag.cx - (e.clientX - drag.x) / cam.z; cam.y = drag.cy - (e.clientY - drag.y) / cam.z; }
+    return;
+  }
+  const tip = $("tip");
+  if (e.target !== cvs) { hoverId = null; tip.style.display = "none"; return; }
+  const p = pick(mx, my);
+  hoverId = p && p.kind === "v" ? p.id : null;
+  if (p) {
+    tip.textContent = p.kind === "v" ? `v-${p.id} · ${STATE_NAMES[veh.get(p.id).state]}`
+      : `i-${p.x}-${p.y} · queue NS ${p.j[4]} / EW ${p.j[5]} · inside ${p.j[6]}${p.j[7] ? " · light failed, fallback timing" : ""}`;
+    tip.style.display = "block"; tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY + 12 + "px";
+  } else tip.style.display = "none";
+});
+cvs.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = cvs.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const wx = mx / cam.z + cam.x, wy = my / cam.z + cam.y;
+  cam.z = Math.max(.3, Math.min(8, cam.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  cam.x = wx - mx / cam.z; cam.y = wy - my / cam.z;
+}, {passive: false});
+cvs.addEventListener("dblclick", () => hello && fit());
+
+/* ---------- charts ---------- */
+function line(c, series, colors, scale) {
+  const x = c.getContext("2d"), dpr = devicePixelRatio || 1, r = c.getBoundingClientRect();
+  if (c.width !== Math.round(r.width * dpr)) { c.width = r.width * dpr; c.height = r.height * dpr; }
+  x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, r.width, r.height);
+  const m = Math.max(1, ...series.map((s, k) => Math.max(0, ...s.map(v => v * (scale ? scale[k] : 1))))) * 1.15;
+  x.strokeStyle = "#1d2840"; x.lineWidth = 1; x.beginPath();
+  for (let g = 1; g < 4; g++) { const y = r.height * g / 4; x.moveTo(0, y); x.lineTo(r.width, y); }
+  x.stroke();
+  series.forEach((s, k) => {
+    x.strokeStyle = colors[k]; x.lineWidth = 1.6; x.beginPath();
+    s.forEach((v, i) => {
+      const px = r.width * (HIST - s.length + i) / (HIST - 1), py = r.height - v * (scale ? scale[k] : 1) / m * r.height;
+      i ? x.lineTo(px, py) : x.moveTo(px, py);
+    });
+    x.stroke();
+  });
+}
+function charts() {
+  const m = last && last.m; if (!m) return;
+  line($("ch1"), [hist.msgs], ["#4cc2ff"]); $("c1v").textContent = fmt(m.processed);
+  line($("ch2"), [hist.dmean, hist.dp95], ["#3ddc97", "#ffc857"]); $("c2v").textContent = fmt(m.delay_mean) + " / " + fmt(m.delay_p95);
+  line($("ch3"), [hist.trips, hist.cong], ["#b388ff", "#ff5d6c"]); $("c3v").textContent = fmt(m.trips_rate, 1) + "/s · " + fmt(last._total ? last._waiting / last._total * 100 : 0) + "%";
+  line($("ch4"), [hist.cpu, hist.rss], ["#ffc857", "#4cc2ff"]); $("c4v").textContent = fmt(m.cpu) + "% · " + fmt(m.rss) + " MB";
+}
+setInterval(charts, 500);
+
+/* ---------- controls ---------- */
+COUNTS.forEach(n => { const b = document.createElement("button"); b.textContent = fmt(n); b.onclick = () => send({cmd: "set_vehicles", n}); $("counts").appendChild(b); });
+$("pause").onclick = () => send({cmd: "pause", on: !paused});
+$("reset").onclick = () => { select(null); send({cmd: "reset"}); };
+$("surge").onclick = () => send({cmd: "surge", d: selectedDistrict});
+$("adddist").onclick = () => send({cmd: "add_district", d: selectedDistrict});
+$("rmdist").onclick = () => send({cmd: "remove_district", d: selectedDistrict});
+
+/* ---------- demo tour ---------- */
+const firstActive = () => [...activeDistricts.keys()][0] ?? 0;
+const pickVehicle = () => { for (const id of veh.keys()) return id; return null; };
+const centerJunction = d => `i-${(d % hello.grid) * hello.block + hello.block / 2}-${Math.floor(d / hello.grid) * hello.block + hello.block / 2}`;
+const STEPS = [
+  {t: "1 · Massive concurrency", b: "Every car is its own actor with a private mailbox; so are junctions, lights and districts. Jumping to 5,000 vehicles spawns thousands of actors in batches while the UI keeps running. Watch actor count, messages/s and tick delay.", run: () => send({cmd: "set_vehicles", n: 5000})},
+  {t: "2 · Message passing", b: "Back to 1,000 vehicles and one is selected. Its inspector shows a live timeline: it asks a junction for entry (RequestIntersectionEntry), gets EntryGranted or EntryDenied, and reports when it leaves. No shared state, only messages.", run: () => { send({cmd: "set_vehicles", n: 1000}); setTimeout(() => { const id = pickVehicle(); if (id !== null) select("v-" + id); }, 2500); }},
+  {t: "3 · Fault isolation", b: "The junction in the centre of the first district is being killed. Cars notice their requests go unanswered, block it and route around. Nothing else stops. Try Crash actor on a light or junction to watch supervision restart it instead.", run: () => { const id = centerJunction(firstActive()); select(id); setTimeout(() => send({cmd: "kill", id, mode: "terminate"}), 800); }},
+  {t: "4 · Dynamic scaling", b: "Districts are actors with whole subtrees below them. One more is being added; actor count and message rate jump. Use 'Remove selected' to watch an entire subtree stop at once.", run: () => { const free = hello.names.findIndex((_, d) => !activeDistricts.has(d)); if (free >= 0) { selectedDistrict = free; send({cmd: "add_district", d: free}); } }},
+  {t: "5 · Traffic surge", b: "800 vehicles head for the centre of one district. Queues build there and tick delay rises while other districts keep their own rhythm. Picard has no mailbox depth or backpressure, so congestion is shown through junction queues.", run: () => { selectedDistrict = firstActive(); send({cmd: "surge", d: selectedDistrict}); }},
+];
+function tour(i) {
+  const el = $("tour");
+  if (i < 0 || i >= STEPS.length) { el.style.display = "none"; return; }
+  const s = STEPS[i]; el.style.display = "block";
+  el.innerHTML = `<h3>${s.t}</h3><div>${s.b}</div><div class="nav"><span class="note" style="margin-right:auto">${i + 1} / ${STEPS.length}</span><button onclick="tour(-1)">Close</button>${i > 0 ? `<button onclick="tour(${i - 1})">Back</button>` : ""}<button class="primary" onclick="tour(${i + 1})">${i + 1 < STEPS.length ? "Next" : "Finish"}</button></div>`;
+  s.run();
+}
+$("tourbtn").onclick = () => tour(0);
+
+connect(); resize(); requestAnimationFrame(draw);
+</script>
+</body>
+</html>

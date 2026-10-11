@@ -24,6 +24,7 @@ Cargo workspace (`resolver = "3"`, `edition = "2024"`). Members under `crates/`:
 | `picard-testkit`  | Test helpers (`probe`)                                                           |
 
 Other top-level items:
+- `demo/`: the `living-city` workspace crate, a browser-based traffic simulation built from Picard actors (brief in `demo/README.md`, docs in `demo/GUIDE.md`).
 - `config/picard.toml`, `config/app.toml`: default configuration files.
 - `examples/*.rs`, `crates/picard/examples/actor_demo.rs`: runnable examples.
 - `tests/*.rs` at the repo root are legacy integration tests and are **not part of any workspace package**, so they are not compiled. Real tests live in `crates/*/tests` and in in-source `#[cfg(test)]` modules.
@@ -60,6 +61,8 @@ cargo clippy --workspace --all-targets -- -D warnings   # must stay clean
 cargo fmt --all
 cargo bench -p picard --bench runtime                   # Criterion: message throughput, round trip, creation
 cargo bench -p picard --bench actor_suite               # Criterion: CAF-style benchmark suite
+cargo run -p living-city --release                      # Living City demo on http://127.0.0.1:8080
+cargo run -p living-city --release -- loadtest          # headless load test, prints a markdown table
 ```
 
 Indicative Criterion measurements (one machine, not a controlled benchmark): `actor_creation` about 5 µs per actor, `actor_round_trip` about 8 µs, `typed_tell` about 33 ns.

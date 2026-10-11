@@ -1,0 +1,22 @@
+[package]
+name = "living-city"
+version = "0.1.0"
+description = "Living City: an interactive traffic simulation that showcases the Picard actor framework."
+authors.workspace = true
+edition.workspace = true
+license-file = "../LICENSE"
+publish = false
+default-run = "living-city"
+
+[lints]
+workspace = true
+
+[dependencies]
+picard.workspace = true
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+serde_json = "1"
+rand = "0.9"
+
+[dev-dependencies]
+serde_json = "1"
