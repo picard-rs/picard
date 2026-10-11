@@ -86,9 +86,6 @@ impl Supervisor {
             for node in district_nodes(index) {
                 self.junctions.remove(&node);
             }
-            self.args
-                .gateway
-                .tell(GatewayMsg::DistrictGone(index), None);
             self.publish_directory();
         }
     }

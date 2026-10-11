@@ -241,6 +241,13 @@ impl Actor for District {
         );
     }
 
+    fn post_stop(&mut self) {
+        // Sent from the district itself so it cannot be overtaken by a late snapshot.
+        self.args
+            .gateway
+            .tell(GatewayMsg::DistrictGone(self.args.index), None);
+    }
+
     fn sys_recv(&mut self, _: &Context<Self::Msg>, msg: SystemMsg, _: Sender) {
         let SystemMsg::Event(SystemEvent::ActorTerminated(t)) = msg else {
             return;
