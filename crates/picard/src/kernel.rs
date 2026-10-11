@@ -5,7 +5,6 @@ pub(crate) mod queue;
 
 use crate::system::ActorSystem;
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum KernelMsg {
     TerminateActor,
@@ -18,7 +17,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use futures::{StreamExt, channel::mpsc::channel, task::SpawnExt};
+use futures::{StreamExt, channel::mpsc::unbounded, task::SpawnExt};
 use slog::warn;
 
 use crate::{
@@ -56,7 +55,7 @@ pub fn kernel<A>(
 where
     A: Actor + 'static,
 {
-    let (tx, mut rx) = channel::<KernelMsg>(1000); // todo config?
+    let (tx, mut rx) = unbounded::<KernelMsg>();
     let kr = KernelRef { tx };
 
     let mut asys = sys.clone();
@@ -81,9 +80,8 @@ where
                         kernel: akr.clone(),
                     };
 
-                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                        run_mailbox(&mailbox, ctx, &mut dock)
-                    })); //.unwrap();
+                    // A panic is reported to the parent by the mailbox sentinel.
+                    let _ = catch_unwind(AssertUnwindSafe(|| run_mailbox(&mailbox, ctx, &mut dock)));
                 }
                 KernelMsg::RestartActor => {
                     restart_actor(&dock, actor_ref.clone().into(), &props, &asys);

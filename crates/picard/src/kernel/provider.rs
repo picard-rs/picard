@@ -63,7 +63,6 @@ impl Provider {
             uri,
             Some(parent.clone()),
             sys,
-            // None,/*perconf*/
             Arc::new(sender.clone()),
             sys_sender,
             sender,
@@ -122,17 +121,12 @@ fn root(sys: &ActorSystem) -> BasicActorRef {
     // This means root also needs a parent.
     // An ActorCell, ActorRef and KernelRef are created
     // independently without an actor being created.
-    // kernel is just a channel to nowhere
-    // let (mut tx, mut _rx) = channel::<KernelMsg>(1000);
-    // let bb_k = KernelRef {
-    //     tx
-    // };
+    // The big bang cell has no kernel: it is just a channel to nowhere.
 
     let bb_cell = ActorCell::new(
         uri.clone(),
         None,
         sys,
-        // None, // old perfaconf
         Arc::new(sender),
         sys_sender,
     );
@@ -148,7 +142,6 @@ fn root(sys: &ActorSystem) -> BasicActorRef {
         uri,
         Some(bigbang),
         sys,
-        // None,/*perconf*/
         Arc::new(sender.clone()),
         sys_sender,
         sender,
@@ -176,7 +169,6 @@ fn guardian(name: &str, path: &str, root: &BasicActorRef, sys: &ActorSystem) -> 
         uri,
         Some(root.clone()),
         sys,
-        // None,/*perconf*/
         Arc::new(sender.clone()),
         sys_sender,
         sender,

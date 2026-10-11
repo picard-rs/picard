@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures::{SinkExt, channel::mpsc::Sender, task::SpawnExt};
+use futures::channel::mpsc::UnboundedSender;
 
 use crate::{
     AnyMessage, Envelope, Message,
@@ -14,33 +14,29 @@ use crate::{
 
 #[derive(Clone)]
 pub struct KernelRef {
-    pub tx: Sender<KernelMsg>,
+    pub tx: UnboundedSender<KernelMsg>,
 }
 
 impl KernelRef {
-    pub(crate) fn schedule(&self, sys: &ActorSystem) {
-        self.send(KernelMsg::RunActor, sys);
+    pub(crate) fn schedule(&self) {
+        self.send(KernelMsg::RunActor);
     }
 
-    pub(crate) fn restart(&self, sys: &ActorSystem) {
-        self.send(KernelMsg::RestartActor, sys);
+    pub(crate) fn restart(&self) {
+        self.send(KernelMsg::RestartActor);
     }
 
-    pub(crate) fn terminate(&self, sys: &ActorSystem) {
-        self.send(KernelMsg::TerminateActor, sys);
+    pub(crate) fn terminate(&self) {
+        self.send(KernelMsg::TerminateActor);
     }
 
     pub(crate) fn sys_init(&self, sys: &ActorSystem) {
-        self.send(KernelMsg::Sys(sys.clone()), sys);
+        self.send(KernelMsg::Sys(sys.clone()));
     }
 
-    fn send(&self, msg: KernelMsg, sys: &ActorSystem) {
-        let mut tx = self.tx.clone();
-        sys.exec
-            .spawn(async move {
-                drop(tx.send(msg).await);
-            })
-            .unwrap();
+    fn send(&self, msg: KernelMsg) {
+        // Fails only once the kernel task has terminated, so there is nothing left to notify.
+        let _ = self.tx.unbounded_send(msg);
     }
 }
 
@@ -48,7 +44,6 @@ pub fn dispatch<Msg>(
     msg: Envelope<Msg>,
     mbox: &MailboxSender<Msg>,
     kernel: &KernelRef,
-    sys: &ActorSystem,
 ) -> MsgResult<Envelope<Msg>>
 where
     Msg: Message,
@@ -57,7 +52,7 @@ where
         Ok(_) => {
             if !mbox.is_scheduled() {
                 mbox.set_scheduled(true);
-                kernel.schedule(sys);
+                kernel.schedule();
             }
 
             Ok(())
@@ -71,12 +66,11 @@ pub fn dispatch_any(
     sender: crate::actor::Sender,
     mbox: &Arc<dyn AnySender>,
     kernel: &KernelRef,
-    sys: &ActorSystem,
 ) -> Result<(), AnyEnqueueError> {
     mbox.try_any_enqueue(msg, sender).map(|_| {
         if !mbox.is_sched() {
             mbox.set_sched(true);
-            kernel.schedule(sys);
+            kernel.schedule();
         }
     })
 }

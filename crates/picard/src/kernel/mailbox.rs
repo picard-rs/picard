@@ -222,7 +222,7 @@ where
 
     let has_msgs = sen.mbox.has_msgs() || sen.mbox.has_sys_msgs();
     if has_msgs && !sen.mbox.is_scheduled() {
-        ctx.kernel.schedule(&ctx.system);
+        ctx.kernel.schedule();
     }
 }
 
@@ -268,7 +268,10 @@ fn process_sys_msgs<A>(
     // and we prevent any new messages that have since been added to the queue
     // from being processed by staging them in a Vec.
     // This prevents during actor restart.
-    let mut sys_msgs: Vec<Envelope<SystemMsg>> = Vec::new();
+    let Ok(first) = mbox.sys_try_dequeue() else {
+        return;
+    };
+    let mut sys_msgs = vec![first];
     while let Ok(sys_msg) = mbox.sys_try_dequeue() {
         sys_msgs.push(sys_msg);
     }

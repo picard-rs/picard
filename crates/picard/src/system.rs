@@ -261,13 +261,11 @@ impl Deref for LoggingSystem {
 /// The `ActorSystem` is the heart of a Picard application,
 /// starting several threads when it is created. Create only one instance
 /// of `ActorSystem` per application.
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ActorSystem {
     proto: Arc<ProtoSystem>,
     sys_actors: Option<SysActors>,
     log: LoggingSystem,
-    debug: bool,
     pub exec: ThreadPool,
     pub timer: TimerRef,
     pub sys_channels: Option<SysChannels>,
@@ -340,7 +338,6 @@ impl ActorSystem {
         // 2. create uninitialized system
         let mut sys = ActorSystem {
             proto: Arc::new(proto),
-            debug,
             exec,
             log,
             // event_store: None,
@@ -424,12 +421,6 @@ impl ActorSystem {
 
         let root = &self.sys_actors.as_ref().unwrap().root;
         print_node(self, root, "");
-    }
-
-    /// Returns the system root's actor reference
-    #[allow(dead_code)]
-    fn root(&self) -> &BasicActorRef {
-        &self.sys_actors.as_ref().unwrap().root
     }
 
     /// Returns the user root actor reference
