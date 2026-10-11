@@ -1,5 +1,3 @@
-#![deny(clippy::all)]
-
 mod validate;
 
 pub mod actor;

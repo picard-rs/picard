@@ -27,6 +27,7 @@ pub struct Bridge {
     n: u32,
 }
 
+#[must_use]
 pub fn hello() -> String {
     let names: Vec<String> = (0..DISTRICT_COUNT)
         .map(|d| format!("\"{}\"", district_name(d)))
@@ -39,6 +40,7 @@ pub fn hello() -> String {
 }
 
 impl Bridge {
+    #[must_use]
     pub fn new(sim: Sim) -> Self {
         let mut sampler = Sampler::new(sim.metrics.clone());
         let sample_json = sampler.sample().to_json();
@@ -51,6 +53,7 @@ impl Bridge {
         }
     }
 
+    #[must_use]
     pub fn sim(&self) -> &Sim {
         &self.sim
     }
@@ -130,6 +133,8 @@ impl Bridge {
     }
 }
 
+#[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn encode(frame: &Frame, sample: &str, selected: Option<&str>) -> String {
     let vehicles: usize = frame.districts.iter().map(|d| d.vehicles.len()).sum();
     let mut out = String::with_capacity(64 + vehicles * 40);

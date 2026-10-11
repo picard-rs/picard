@@ -26,6 +26,7 @@ pub mod channel {
         time::Instant,
     };
 
+    #[must_use]
     pub fn probe<T: Send>() -> (ChannelProbe<(), T>, ChannelProbeReceive<T>) {
         probe_with_payload(())
     }
@@ -108,7 +109,7 @@ pub mod channel {
         }
 
         fn last_event_milliseconds(&self) -> u64 {
-            self.timer_start.elapsed().as_millis() as u64
+            u64::try_from(self.timer_start.elapsed().as_millis()).unwrap_or(u64::MAX)
         }
 
         fn last_event_seconds(&self) -> u64 {

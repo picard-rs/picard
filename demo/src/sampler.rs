@@ -36,6 +36,7 @@ pub struct Sample {
 }
 
 impl Sample {
+    #[must_use]
     pub fn to_json(&self) -> String {
         let mut s = String::with_capacity(512);
         let _ = write!(

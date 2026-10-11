@@ -191,7 +191,7 @@ where
     (sender, sys_sender, mailbox)
 }
 
-pub fn run_mailbox<A>(mbox: &Mailbox<A::Msg>, ctx: Context<A::Msg>, dock: &mut Dock<A>)
+pub fn run_mailbox<A>(mbox: &Mailbox<A::Msg>, ctx: &Context<A::Msg>, dock: &mut Dock<A>)
 where
     A: Actor,
 {
@@ -204,13 +204,13 @@ where
     let mut actor = dock.actor.lock().unwrap().take();
     let cell = &mut dock.cell;
 
-    process_sys_msgs(sen.mbox, &ctx, cell, &mut actor);
+    process_sys_msgs(sen.mbox, ctx, cell, &mut actor);
 
     if actor.is_some() && !sen.mbox.is_suspended() {
-        process_msgs(sen.mbox, &ctx, cell, &mut actor);
+        process_msgs(sen.mbox, ctx, cell, &mut actor);
     }
 
-    process_sys_msgs(sen.mbox, &ctx, cell, &mut actor);
+    process_sys_msgs(sen.mbox, ctx, cell, &mut actor);
 
     if actor.is_some() {
         let mut a = dock.actor.lock().unwrap();
@@ -287,7 +287,7 @@ fn process_sys_msgs<A>(
             SystemMsg::ActorInit => handle_init(mbox, ctx, cell, actor),
             SystemMsg::Command(cmd) => cell.receive_cmd(cmd, actor),
             SystemMsg::Event(evt) => handle_evt(evt, ctx, cell, actor),
-            SystemMsg::Failed(failed) => handle_failed(failed, cell, actor),
+            SystemMsg::Failed(failed) => handle_failed(&failed, cell, actor),
         }
     }
 }
@@ -315,7 +315,7 @@ fn handle_init<A>(
     actor.as_mut().unwrap().post_start(ctx);
 }
 
-fn handle_failed<A>(failed: BasicActorRef, cell: &ExtendedCell<A::Msg>, actor: &mut Option<A>)
+fn handle_failed<A>(failed: &BasicActorRef, cell: &ExtendedCell<A::Msg>, actor: &mut Option<A>)
 where
     A: Actor,
 {

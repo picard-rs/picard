@@ -7,6 +7,7 @@ use std::{
 pub struct ActorPath(Arc<str>);
 
 impl ActorPath {
+    #[must_use]
     pub fn new(path: &str) -> Self {
         Self(Arc::from(path))
     }

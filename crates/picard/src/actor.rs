@@ -1,4 +1,3 @@
-#![allow(unused_variables)]
 pub(crate) mod actor_cell;
 pub(crate) mod actor_ref;
 pub(crate) mod channel;
@@ -138,7 +137,7 @@ pub trait Actor: Send + 'static {
     ///
     /// Panics in `pre_start` do not invoke the
     /// supervision strategy and the actor will be terminated.
-    fn pre_start(&mut self, ctx: &Context<Self::Msg>) {}
+    fn pre_start(&mut self, _ctx: &Context<Self::Msg>) {}
 
     /// Invoked after an actor has started.
     ///
@@ -146,7 +145,7 @@ pub trait Actor: Send + 'static {
     /// to a log file, emitting metrics.
     ///
     /// Panics in `post_start` follow the supervision strategy.
-    fn post_start(&mut self, ctx: &Context<Self::Msg>) {}
+    fn post_start(&mut self, _ctx: &Context<Self::Msg>) {}
 
     /// Invoked after an actor has been stopped.
     fn post_stop(&mut self) {}
@@ -160,7 +159,7 @@ pub trait Actor: Send + 'static {
     ///
     /// It is guaranteed that only one message in the actor's mailbox is processed
     /// at any one time, including `recv` and `sys_recv`.
-    fn sys_recv(&mut self, ctx: &Context<Self::Msg>, msg: SystemMsg, sender: Sender) {}
+    fn sys_recv(&mut self, _ctx: &Context<Self::Msg>, _msg: SystemMsg, _sender: Sender) {}
 
     /// Invoked when an actor receives a message
     ///
@@ -276,6 +275,7 @@ pub type BoxActor<Msg> = Box<dyn Actor<Msg = Msg> + Send>;
 /// Supervision strategy
 ///
 /// Returned in `Actor.supervision_strategy`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Strategy {
     /// Stop the child actor
     Stop,

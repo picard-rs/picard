@@ -37,6 +37,7 @@ impl Histogram {
 }
 
 /// Mean and p95 (in microseconds) of the samples recorded between two snapshots.
+#[must_use]
 pub fn summarize(prev: &[u64; BUCKETS], now: &[u64; BUCKETS]) -> (f64, f64) {
     let delta: Vec<u64> = now
         .iter()
@@ -62,7 +63,8 @@ pub fn summarize(prev: &[u64; BUCKETS], now: &[u64; BUCKETS]) -> (f64, f64) {
         .map(|(i, c)| mid(i) * *c as f64)
         .sum::<f64>()
         / total as f64;
-    let target = (total as f64 * 0.95).ceil() as u64;
+    // ceil(0.95 * total) without floating point.
+    let target = total - total / 20;
     let mut acc = 0;
     for (i, c) in delta.iter().enumerate() {
         acc += c;

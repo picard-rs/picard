@@ -27,6 +27,7 @@ pub struct RuntimeStats {
 
 impl RuntimeStats {
     /// Actors created but not yet terminated.
+    #[must_use]
     pub fn live_actors(&self) -> u64 {
         self.actors_created.saturating_sub(self.actors_terminated)
     }

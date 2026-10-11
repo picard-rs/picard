@@ -11,6 +11,10 @@ fn vehicles(frame: &Frame) -> usize {
 }
 
 /// Runs every size for `secs` (after a warm-up) and returns the results as a markdown table.
+///
+/// # Panics
+///
+/// Panics if the simulation cannot be started.
 pub async fn run(sizes: &[usize], secs: Duration) -> String {
     let sim = Sim::start(0).expect("start simulation");
     let mut sampler = Sampler::new(sim.metrics.clone());

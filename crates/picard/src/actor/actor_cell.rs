@@ -151,7 +151,7 @@ impl ActorCell {
         self.inner.children.contains(actor)
     }
 
-    pub(crate) fn stop(&self, actor: &BasicActorRef) {
+    pub(crate) fn stop(actor: &BasicActorRef) {
         actor.send_system_message(SystemCmd::Stop.into());
     }
 
@@ -179,7 +179,7 @@ impl ActorCell {
 
         if self.has_children() {
             for child in self.inner.children.iter() {
-                self.stop(&child);
+                Self::stop(&child);
             }
         } else {
             self.kernel().terminate();
@@ -191,7 +191,7 @@ impl ActorCell {
         if self.has_children() {
             self.inner.is_restarting.store(true, Ordering::Relaxed);
             for child in self.inner.children.iter() {
-                self.stop(&child);
+                Self::stop(&child);
             }
         } else {
             self.kernel().restart();
@@ -218,7 +218,7 @@ impl ActorCell {
         }
     }
 
-    pub fn handle_failure(&self, failed: BasicActorRef, strategy: Strategy) {
+    pub fn handle_failure(&self, failed: &BasicActorRef, strategy: Strategy) {
         #[cfg(feature = "tracing")]
         tracing::warn!(
             supervisor = %self.uri().path,
@@ -231,13 +231,13 @@ impl ActorCell {
             "supervising failed child"
         );
         match strategy {
-            Strategy::Stop => self.stop(&failed),
-            Strategy::Restart => self.restart_child(&failed),
+            Strategy::Stop => Self::stop(failed),
+            Strategy::Restart => Self::restart_child(failed),
             Strategy::Escalate => self.escalate_failure(),
         }
     }
 
-    pub fn restart_child(&self, actor: &BasicActorRef) {
+    pub fn restart_child(actor: &BasicActorRef) {
         actor.send_system_message(SystemCmd::Restart.into());
     }
 
@@ -431,7 +431,7 @@ where
         &self.cell.inner.system
     }
 
-    pub(crate) fn handle_failure(&self, failed: BasicActorRef, strategy: Strategy) {
+    pub(crate) fn handle_failure(&self, failed: &BasicActorRef, strategy: Strategy) {
         self.cell.handle_failure(failed, strategy);
     }
 
@@ -482,6 +482,7 @@ where
     Msg: Message,
 {
     /// Returns the `ActorRef` of the current actor.
+    #[must_use]
     pub fn myself(&self) -> ActorRef<Msg> {
         self.myself.clone()
     }
@@ -516,7 +517,7 @@ impl<Msg: Message> ActorRefFactory for Context<Msg> {
         A: ActorFactory,
     {
         self.system.provider.create_actor(
-            Props::new::<A>(),
+            Props::produce::<A>(),
             name,
             &self.myself().into(),
             &self.system,

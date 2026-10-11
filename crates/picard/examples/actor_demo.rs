@@ -48,7 +48,7 @@ fn main() {
     let workers = std::thread::available_parallelism()
         .map_or(1, usize::from)
         .min(MAX_WORKERS)
-        .min(ITEMS as usize);
+        .min(usize::try_from(ITEMS).unwrap_or(usize::MAX));
     let system = ActorSystem::with_name("efficiency-demo").expect("start actor system");
     let actors: Vec<_> = (0..workers)
         .map(|index| {

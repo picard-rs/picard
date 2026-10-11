@@ -49,6 +49,11 @@ impl<A: Actor> Clone for Dock<A> {
     }
 }
 
+/// Starts the kernel task that drives an actor's lifecycle and mailbox.
+///
+/// # Panics
+///
+/// Panics if the kernel task cannot be spawned on the system's executor.
 pub fn kernel<A>(
     props: BoxActorProd<A>,
     cell: ExtendedCell<A::Msg>,
@@ -94,7 +99,7 @@ where
 
                     // A panic is reported to the parent by the mailbox sentinel.
                     let _ =
-                        catch_unwind(AssertUnwindSafe(|| run_mailbox(&mailbox, ctx, &mut dock)));
+                        catch_unwind(AssertUnwindSafe(|| run_mailbox(&mailbox, &ctx, &mut dock)));
                 }
                 KernelMsg::RestartActor => {
                     restart_actor(&dock, actor_ref.clone().into(), &props, &asys);

@@ -30,6 +30,7 @@ impl Demo {
         })
     }
 
+    #[must_use]
     pub fn hello() -> String {
         hello()
     }

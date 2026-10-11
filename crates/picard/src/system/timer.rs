@@ -129,6 +129,7 @@ pub struct BasicTimer {
 
 impl BasicTimer {
     #[cfg(not(target_arch = "wasm32"))]
+    #[must_use]
     pub fn start() -> TimerRef {
         let mut process = Self::default();
         let (tx, rx) = mpsc::channel();
@@ -162,6 +163,7 @@ impl BasicTimer {
     }
 
     #[cfg(target_arch = "wasm32")]
+    #[must_use]
     pub fn start() -> TimerRef {
         WasmTimerRef::default()
     }

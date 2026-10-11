@@ -41,9 +41,10 @@ impl ActorSelection {
     pub fn new(
         anchor: BasicActorRef,
         // dl: &BasicActorRef,
-        path: String,
+        path: impl AsRef<str>,
     ) -> Result<Self, InvalidPath> {
-        validate_path(&path)?;
+        let path = path.as_ref();
+        validate_path(path)?;
 
         let path_vec: Vec<Selection> = path
             .split_terminator('/')
@@ -113,12 +114,19 @@ impl ActorSelection {
         let sender = sender.into();
         let mut delivered = 0;
         let mut failed = 0;
-        for target in targets {
-            if target.try_tell(msg.clone(), sender.clone()).is_ok() {
+        let last = targets.pop();
+        let mut record = |ok: bool| {
+            if ok {
                 delivered += 1;
             } else {
                 failed += 1;
             }
+        };
+        for target in &targets {
+            record(target.try_tell(msg.clone(), sender.clone()).is_ok());
+        }
+        if let Some(target) = last {
+            record(target.try_tell(msg, sender).is_ok());
         }
         if failed == 0 {
             Ok(delivered)

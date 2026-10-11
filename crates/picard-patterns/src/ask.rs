@@ -25,6 +25,11 @@ use picard::actors::{
 /// of the actor system, such as sending data from HTTP request to an actor
 /// and returning a future to the HTTP response, or using await.
 ///
+/// # Panics
+///
+/// Panics if the temporary reply actor cannot be created or the future cannot be
+/// spawned on `ctx`. The returned future panics if the reply actor stops before replying.
+///
 /// # Examples
 ///
 /// ```

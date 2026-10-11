@@ -28,6 +28,7 @@ pub enum Axis {
 }
 
 impl Axis {
+    #[must_use]
     pub const fn index(self) -> usize {
         match self {
             Self::Ns => 0,
@@ -46,6 +47,7 @@ impl Axis {
 
 impl Node {
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
     pub const fn new(x: i32, y: i32) -> Self {
         Self {
             x: x as i16,
@@ -53,25 +55,30 @@ impl Node {
         }
     }
 
+    #[must_use]
     pub fn in_city(x: i32, y: i32) -> bool {
         (0..GRID_NODES).contains(&x) && (0..GRID_NODES).contains(&y)
     }
 
     #[allow(clippy::cast_sign_loss)]
+    #[must_use]
     pub fn district(self) -> usize {
         let (x, y) = (i32::from(self.x) / BLOCK, i32::from(self.y) / BLOCK);
         (y * GRID_DISTRICTS + x) as usize
     }
 
+    #[must_use]
     pub fn junction_name(self) -> String {
         format!("i-{}-{}", self.x, self.y)
     }
 
+    #[must_use]
     pub fn light_name(self) -> String {
         format!("l-{}-{}", self.x, self.y)
     }
 
     /// Parses `i-x-y` / `l-x-y` ids into the kind prefix and node.
+    #[must_use]
     pub fn parse(id: &str) -> Option<(char, Self)> {
         let mut parts = id.split('-');
         let kind = parts.next()?.chars().next()?;
@@ -81,6 +88,7 @@ impl Node {
     }
 
     /// Axis of travel when moving from `self` to the adjacent node `to`.
+    #[must_use]
     pub fn axis_to(self, to: Self) -> Axis {
         if self.x == to.x { Axis::Ns } else { Axis::Ew }
     }
@@ -94,20 +102,22 @@ impl Node {
     }
 }
 
-#[allow(clippy::cast_possible_wrap)]
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
 pub fn district_nodes(district: usize) -> impl Iterator<Item = Node> {
     let dx = (district as i32 % GRID_DISTRICTS) * BLOCK;
     let dy = (district as i32 / GRID_DISTRICTS) * BLOCK;
     (0..BLOCK).flat_map(move |y| (0..BLOCK).map(move |x| Node::new(dx + x, dy + y)))
 }
 
-#[allow(clippy::cast_possible_wrap)]
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+#[must_use]
 pub fn district_center(district: usize) -> Node {
     let dx = (district as i32 % GRID_DISTRICTS) * BLOCK;
     let dy = (district as i32 / GRID_DISTRICTS) * BLOCK;
     Node::new(dx + BLOCK / 2, dy + BLOCK / 2)
 }
 
+#[must_use]
 pub fn district_name(district: usize) -> &'static str {
     const NAMES: [&str; DISTRICT_COUNT] = [
         "Harbor",

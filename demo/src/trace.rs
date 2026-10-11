@@ -56,10 +56,12 @@ impl Trace {
         }
     }
 
+    #[must_use]
     pub fn is_watched(&self) -> bool {
         self.watched_until.is_some()
     }
 
+    #[must_use]
     pub fn to_json(&self, me: &str) -> Value {
         let recent: Vec<Value> = self
             .ring

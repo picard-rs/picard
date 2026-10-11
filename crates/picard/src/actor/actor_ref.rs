@@ -188,10 +188,12 @@ pub struct BasicActorRef {
 
 impl BasicActorRef {
     #[doc(hidden)]
+    #[must_use]
     pub fn new(cell: ActorCell) -> Self {
         Self { cell }
     }
 
+    #[must_use]
     pub fn typed<Msg: Message>(&self, cell: ExtendedCell<Msg>) -> ActorRef<Msg> {
         ActorRef { cell }
     }
@@ -407,6 +409,7 @@ impl<Msg: Message> Clone for ActorRef<Msg> {
 
 impl<Msg: Message> ActorRef<Msg> {
     #[doc(hidden)]
+    #[must_use]
     pub fn new(cell: ExtendedCell<Msg>) -> Self {
         Self { cell }
     }

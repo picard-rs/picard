@@ -94,10 +94,10 @@ impl<H> Core<H> {
     pub fn drain(&mut self, signal: Signal) -> Vec<(VehicleId, H)> {
         let mut granted = Vec::new();
         for axis in [Axis::Ns, Axis::Ew] {
-            while !self.queues[axis.index()].is_empty() && self.allowed(axis, signal) {
-                let (id, handle) = self.queues[axis.index()]
-                    .pop_front()
-                    .expect("checked non-empty");
+            while self.allowed(axis, signal) {
+                let Some((id, handle)) = self.queues[axis.index()].pop_front() else {
+                    break;
+                };
                 self.admit(id, axis);
                 granted.push((id, handle));
             }
@@ -116,10 +116,12 @@ impl<H> Core<H> {
         self.inside.retain(|i| i.lease > 0.0);
     }
 
+    #[must_use]
     pub fn queued(&self, axis: Axis) -> usize {
         self.queues[axis.index()].len()
     }
 
+    #[must_use]
     pub fn inside(&self) -> usize {
         self.inside.len()
     }
@@ -129,6 +131,7 @@ impl<H> Core<H> {
     }
 
     /// The safety invariant: everybody inside travels on the same axis and capacity is respected.
+    #[must_use]
     pub fn is_safe(&self) -> bool {
         self.inside.len() <= CAPACITY && self.inside.windows(2).all(|w| w[0].axis == w[1].axis)
     }

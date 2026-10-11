@@ -8,7 +8,10 @@ use std::{
 };
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use picard::actors::*;
+use picard::actors::{
+    Actor, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference, ActorSystem, BasicActorRef,
+    Context, DispatcherConfig, LogConfig, Message, PicardConfig, Sender, Tell, Timer,
+};
 
 fn benchmark_system() -> ActorSystem {
     let config = PicardConfig {
@@ -268,6 +271,8 @@ impl Actor for MandelbrotWorker {
     }
 }
 
+// Row widths are small, so converting coordinates to `f64` is exact.
+#[allow(clippy::cast_precision_loss)]
 fn mandelbrot_row(width: usize, y: usize) -> u64 {
     const MAX_ITERATIONS: usize = 250;
     let ci = 2.0 * y as f64 / width as f64 - 1.0;

@@ -25,7 +25,7 @@ pub enum SystemMsg {
     Failed(BasicActorRef),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum SystemCmd {
     Stop,
     Restart,
@@ -190,6 +190,7 @@ pub struct SystemBuilder {
 }
 
 impl SystemBuilder {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -341,12 +342,13 @@ impl ActorSystem {
         let timer = BasicTimer::start();
 
         // 1. create proto system
+        let sys_settings = SystemSettings::from(&cfg);
         let proto = ProtoSystem {
             id: Uuid::new_v4(),
             name: name.to_string(),
             host: Arc::from("localhost"),
-            config: cfg.clone(),
-            sys_settings: SystemSettings::from(&cfg),
+            config: cfg,
+            sys_settings,
             started_at: Utc::now(),
             started_instant: Instant::now(),
             #[cfg(feature = "stats")]
@@ -394,11 +396,13 @@ impl ActorSystem {
     }
 
     /// Returns the system start date
+    #[must_use]
     pub fn start_date(&self) -> &DateTime<Utc> {
         &self.proto.started_at
     }
 
     /// Returns the number of seconds since the system started
+    #[must_use]
     pub fn uptime(&self) -> u64 {
         self.proto.started_instant.elapsed().as_secs()
     }
@@ -408,20 +412,29 @@ impl ActorSystem {
     /// The host is used in actor addressing.
     ///
     /// Currently not used, but will be once system clustering is introduced.
+    #[must_use]
     pub fn host(&self) -> Arc<str> {
         self.proto.host.clone()
     }
 
     /// Returns the UUID assigned to the system
+    #[must_use]
     pub fn id(&self) -> Uuid {
         self.proto.id
     }
 
     /// Returns the name of the system
+    #[must_use]
     pub fn name(&self) -> String {
         self.proto.name.clone()
     }
 
+    /// Prints the actor hierarchy to stdout
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system's root actors have not been created, which cannot
+    /// happen for a system returned by its constructors.
     pub fn print_tree(&self) {
         fn print_node(sys: &ActorSystem, node: &BasicActorRef, indent: &str) {
             if node.is_root() {
@@ -444,26 +457,56 @@ impl ActorSystem {
     }
 
     /// Returns the user root actor reference
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system's root actors have not been created, which cannot
+    /// happen for a system returned by its constructors.
+    #[must_use]
     pub fn user_root(&self) -> &BasicActorRef {
         &self.sys_actors.as_ref().unwrap().user
     }
 
     /// Returns the system root actor reference
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system's root actors have not been created, which cannot
+    /// happen for a system returned by its constructors.
+    #[must_use]
     pub fn sys_root(&self) -> &BasicActorRef {
         &self.sys_actors.as_ref().unwrap().sysm
     }
 
-    /// Reutrns the temp root actor reference
+    /// Returns the temp root actor reference
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system's root actors have not been created, which cannot
+    /// happen for a system returned by its constructors.
+    #[must_use]
     pub fn temp_root(&self) -> &BasicActorRef {
         &self.sys_actors.as_ref().unwrap().temp
     }
 
     /// Returns a reference to the system events channel
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system channels have not been started, which cannot
+    /// happen for a system returned by its constructors.
+    #[must_use]
     pub fn sys_events(&self) -> &ActorRef<ChannelMsg<SystemEvent>> {
         &self.sys_channels.as_ref().unwrap().sys_events
     }
 
     /// Returns a reference to the dead letters channel
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system channels have not been started, which cannot
+    /// happen for a system returned by its constructors.
+    #[must_use]
     pub fn dead_letters(&self) -> &ActorRef<DLChannelMsg> {
         &self.sys_channels.as_ref().unwrap().dead_letters
     }
@@ -474,6 +517,7 @@ impl ActorSystem {
     }
 
     /// Returns the `PicardConfig` used by the system
+    #[must_use]
     pub fn config(&self) -> &PicardConfig {
         &self.proto.config
     }
@@ -486,6 +530,7 @@ impl ActorSystem {
     ///
     /// Requires the `stats` feature.
     #[cfg(feature = "stats")]
+    #[must_use]
     pub fn stats(&self) -> RuntimeStats {
         self.proto.stats.snapshot()
     }
@@ -514,7 +559,7 @@ impl ActorSystem {
         A: ActorFactory,
     {
         self.provider
-            .create_actor(Props::new::<A>(), name, self.sys_root(), self)
+            .create_actor(Props::produce::<A>(), name, self.sys_root(), self)
     }
 
     pub fn sys_actor_of_args<A, Args>(
@@ -531,6 +576,7 @@ impl ActorSystem {
     }
 
     #[inline]
+    #[must_use]
     pub fn log(&self) -> LoggingSystem {
         self.log.clone()
     }
@@ -542,6 +588,10 @@ impl ActorSystem {
     ///
     /// Does not block. Returns a future which is completed when all
     /// actors have successfully stopped.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the temporary shutdown actor cannot be created.
     pub fn shutdown(&self) -> Shutdown {
         #[cfg(feature = "tracing")]
         tracing::info!(system = %self.proto.name, id = %self.id(), "actor system shutting down");
@@ -573,7 +623,7 @@ impl ActorRefFactory for ActorSystem {
         A: ActorFactory,
     {
         self.provider
-            .create_actor(Props::new::<A>(), name, self.user_root(), self)
+            .create_actor(Props::produce::<A>(), name, self.user_root(), self)
     }
 
     fn actor_of_args<A, Args>(
@@ -612,7 +662,7 @@ impl ActorRefFactory for &ActorSystem {
         A: ActorFactory,
     {
         self.provider
-            .create_actor(Props::new::<A>(), name, self.user_root(), self)
+            .create_actor(Props::produce::<A>(), name, self.user_root(), self)
     }
 
     fn actor_of_args<A, Args>(
@@ -649,7 +699,7 @@ impl TmpActorRefFactory for ActorSystem {
     {
         let name = rand::random::<u64>().to_string();
         self.provider
-            .create_actor(Props::new::<A>(), &name, self.temp_root(), self)
+            .create_actor(Props::produce::<A>(), &name, self.temp_root(), self)
     }
 
     fn tmp_actor_of_args<A, Args>(
@@ -860,7 +910,7 @@ fn sys_actor_of<A>(
 where
     A: ActorFactory,
 {
-    prov.create_actor(Props::new::<A>(), name, sys.sys_root(), sys)
+    prov.create_actor(Props::produce::<A>(), name, sys.sys_root(), sys)
         .map_err(|_| SystemError::ModuleFailed(name.into()))
 }
 

@@ -31,6 +31,10 @@ pub enum Fault {
 ///
 /// Natively the actor panics. `wasm32-unknown-unknown` aborts on panic, so there the actor
 /// reports its own failure to the parent instead, which restarts it the same way.
+///
+/// # Panics
+///
+/// Always panics on native targets; that is how the failure is injected.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn crash<M: Message>(_: &Context<M>, name: &str) {
     panic!("fault injected into {name}");
@@ -118,6 +122,7 @@ impl Signal {
         yellow: false,
     };
 
+    #[must_use]
     pub fn permits(self, axis: Axis) -> bool {
         self.green == Some(axis) && !self.yellow
     }
