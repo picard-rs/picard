@@ -21,7 +21,6 @@ pub enum SystemMsg {
     Failed(BasicActorRef),
 }
 
-unsafe impl Send for SystemMsg {}
 
 #[derive(Clone, Debug)]
 pub enum SystemCmd {
@@ -528,8 +527,6 @@ impl ActorSystem {
     }
 }
 
-unsafe impl Send for ActorSystem {}
-unsafe impl Sync for ActorSystem {}
 
 impl ActorRefFactory for ActorSystem {
     fn actor_of_props<A>(
@@ -1067,5 +1064,21 @@ impl Receive<ActorTerminated> for ShutdownActor {
         {
             tx.send(()).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod send_sync_tests {
+    use super::{ActorSystem, SystemMsg};
+    use crate::kernel::{kernel_ref::KernelRef, mailbox::MailboxSender};
+
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn core_types_are_send_and_sync_without_unsafe() {
+        assert_send_sync::<ActorSystem>();
+        assert_send_sync::<SystemMsg>();
+        assert_send_sync::<KernelRef>();
+        assert_send_sync::<MailboxSender<u8>>();
     }
 }
