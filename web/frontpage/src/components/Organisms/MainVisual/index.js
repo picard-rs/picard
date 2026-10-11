@@ -35,6 +35,7 @@ const MainVisual = () => {
         </ListBadges>
         <ButtonWrapper>
           <ButtonLink href={withPrefix("/docs/actors.html")} primary={"1"}>Get Started</ButtonLink>
+          <ButtonLink href={withPrefix("/demo/")}>Live Demo</ButtonLink>
           <ButtonLink href={withPrefix("/docs/faq.html")}>FAQ</ButtonLink>
         </ButtonWrapper>
       </Container>

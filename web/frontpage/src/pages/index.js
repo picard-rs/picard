@@ -9,9 +9,12 @@ import {
   Pre,
   LineNo
 } from '../styled'
+import { withPrefix } from 'gatsby'
+import LivingCityImage from '../components/Organisms/MainVisual/LivingCity.png'
 import Layout from '../components/Layout'
 import GlobalHeader from '../components/Molecules/GlobalHeader'
 import MainVisual from '../components/Organisms/MainVisual'
+import { ButtonLink } from '../components/Atoms/Button'
 import Content from '../components/Molecules/Content'
 import SectionHeader from '../components/Molecules/SectionHeader'
 import { Copyright } from '../components/styledTypography'
@@ -54,6 +57,30 @@ const IndexPage = () => (
         <GlobalHeader />
       </LayoutHeader>
       <MainVisual />
+      <Section id='demo'>
+        <SectionContainer>
+          <Spacer size={30} />
+          <SectionHeader header='Live Demo: Living City' />
+          <Spacer size={16} />
+          <p>
+            Every car, junction, traffic light and district in this city is a Picard actor.
+            Spawn thousands of vehicles, crash an actor and watch supervision restart it, or add a
+            whole district at runtime. The simulation runs entirely in your browser: Picard compiled
+            to WebAssembly, no server involved.
+          </p>
+          <Spacer size={16} />
+          <a href={withPrefix('/demo/')}>
+            <img
+              src={LivingCityImage}
+              alt='Screenshot of the Living City demo'
+              style={{ width: '100%', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,.25)' }}
+            />
+          </a>
+          <Spacer size={16} />
+          <ButtonLink href={withPrefix('/demo/')} primary={'1'}>Launch the demo</ButtonLink>
+        </SectionContainer>
+        <Spacer size={80} />
+      </Section>
       <Section bg={'#F1F3F5'}>
         <SectionContainer>
           <Spacer size={30} />
