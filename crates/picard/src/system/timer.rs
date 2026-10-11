@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::{
-    AnyMessage, Message,
+    AnyMessage, LocalMessage,
     actor::{ActorRef, BasicActorRef, Sender},
     platform::Instant,
 };
@@ -35,8 +35,8 @@ pub trait Timer {
         msg: T,
     ) -> ScheduleId
     where
-        T: Message + Into<M>,
-        M: Message + Clone;
+        T: LocalMessage + Into<M>,
+        M: LocalMessage + Clone;
 
     fn schedule_once<T, M>(
         &self,
@@ -46,8 +46,8 @@ pub trait Timer {
         msg: T,
     ) -> ScheduleId
     where
-        T: Message + Into<M>,
-        M: Message;
+        T: LocalMessage + Into<M>,
+        M: LocalMessage;
 
     fn schedule_at_time<T, M>(
         &self,
@@ -57,8 +57,8 @@ pub trait Timer {
         msg: T,
     ) -> ScheduleId
     where
-        T: Message + Into<M>,
-        M: Message;
+        T: LocalMessage + Into<M>,
+        M: LocalMessage;
 
     fn cancel_schedule(&self, id: Uuid);
 }

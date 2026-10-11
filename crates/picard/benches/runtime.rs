@@ -10,19 +10,27 @@ use std::{
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::executor::block_on;
 use picard::actors::{
-    Actor, ActorRef, ActorRefFactory, ActorReference, ActorSystem, BasicActorRef, Context,
-    DispatcherConfig, LogConfig, PicardConfig, Sender, Tell,
+    Actor, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference, ActorSystem, BasicActorRef,
+    Context, DispatcherConfig, LogConfig, PicardConfig, Sender, Tell,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum BenchMessage {
     Work,
-    Barrier(ChannelSender<()>),
-    RoundTrip(ChannelSender<()>),
+    Barrier,
 }
 
-#[derive(Default)]
-struct BenchActor;
+/// Replies on its `done` channel whenever it receives a `Barrier`, so messages stay serializable.
+struct BenchActor {
+    done: ChannelSender<()>,
+}
+
+impl ActorFactoryArgs<ChannelSender<()>> for BenchActor {
+    fn create_args(done: ChannelSender<()>) -> Self {
+        Self { done }
+    }
+}
 
 impl Actor for BenchActor {
     type Msg = BenchMessage;
@@ -30,8 +38,8 @@ impl Actor for BenchActor {
     fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
         match msg {
             BenchMessage::Work => black_box(()),
-            BenchMessage::Barrier(done) | BenchMessage::RoundTrip(done) => {
-                let _ = done.send(());
+            BenchMessage::Barrier => {
+                let _ = self.done.send(());
             }
         }
     }
@@ -79,11 +87,20 @@ fn stop_and_wait(system: &ActorSystem, actors: Vec<ActorRef<BenchMessage>>) {
 
 fn bench_runtime(c: &mut Criterion) {
     let system = benchmark_system();
-    let typed_actor = system.actor_of::<BenchActor>("typed-messages").unwrap();
-    let untyped_actor = system.actor_of::<BenchActor>("untyped-messages").unwrap();
-    let untyped_actor: BasicActorRef = untyped_actor.into();
     let (typed_done_tx, typed_done_rx) = mpsc::channel();
     let (untyped_done_tx, untyped_done_rx) = mpsc::channel();
+    let (round_trip_tx, round_trip_rx) = mpsc::channel();
+    let (created_tx, _created_rx) = mpsc::channel();
+    let typed_actor = system
+        .actor_of_args::<BenchActor, _>("typed-messages", typed_done_tx)
+        .unwrap();
+    let untyped_actor = system
+        .actor_of_args::<BenchActor, _>("untyped-messages", untyped_done_tx)
+        .unwrap();
+    let untyped_actor: BasicActorRef = untyped_actor.into();
+    let round_trip_actor = system
+        .actor_of_args::<BenchActor, _>("round-trip", round_trip_tx)
+        .unwrap();
 
     let mut messages = c.benchmark_group("actor_message_throughput");
     messages.throughput(Throughput::Elements(1));
@@ -93,7 +110,7 @@ fn bench_runtime(c: &mut Criterion) {
             for _ in 0..iters {
                 typed_actor.tell(BenchMessage::Work, None);
             }
-            typed_actor.tell(BenchMessage::Barrier(typed_done_tx.clone()), None);
+            typed_actor.tell(BenchMessage::Barrier, None);
             typed_done_rx
                 .recv()
                 .expect("actor stopped before processing typed messages");
@@ -109,7 +126,7 @@ fn bench_runtime(c: &mut Criterion) {
                     .expect("actor rejected benchmark message");
             }
             untyped_actor
-                .try_tell(BenchMessage::Barrier(untyped_done_tx.clone()), None)
+                .try_tell(BenchMessage::Barrier, None)
                 .expect("actor rejected benchmark barrier");
             untyped_done_rx
                 .recv()
@@ -119,12 +136,11 @@ fn bench_runtime(c: &mut Criterion) {
     });
     messages.finish();
 
-    let (round_trip_tx, round_trip_rx) = mpsc::channel();
     c.bench_function("actor_round_trip", |b| {
         b.iter_custom(|iters| {
             let start = Instant::now();
             for _ in 0..iters {
-                typed_actor.tell(BenchMessage::RoundTrip(round_trip_tx.clone()), None);
+                round_trip_actor.tell(BenchMessage::Barrier, None);
                 round_trip_rx
                     .recv()
                     .expect("actor stopped before replying to round trip");
@@ -142,7 +158,11 @@ fn bench_runtime(c: &mut Criterion) {
                 let id = next_actor_id.fetch_add(1, Ordering::Relaxed);
                 let name = format!("created-{id}");
                 let start = Instant::now();
-                actors.push(system.actor_of::<BenchActor>(&name).unwrap());
+                actors.push(
+                    system
+                        .actor_of_args::<BenchActor, _>(&name, created_tx.clone())
+                        .unwrap(),
+                );
                 measured += start.elapsed();
             }
             stop_and_wait(&system, actors);

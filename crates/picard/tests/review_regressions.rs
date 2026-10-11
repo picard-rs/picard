@@ -1,11 +1,12 @@
 use chrono::{TimeZone, Utc};
 use picard::actors::*;
+use serde::{Deserialize, Serialize};
 use std::{
     sync::mpsc::{self, Sender as ChannelSender},
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct ProbeMessage;
 
 #[derive(Default)]
@@ -158,27 +159,34 @@ fn failed_actor_creation_releases_reserved_path() {
     assert!(system.actor_of::<RetryActor>("retry-after-failure").is_ok());
 }
 
-#[derive(Debug)]
-struct MoveOnlyMessage(mpsc::Sender<String>);
+#[derive(Debug, Serialize, Deserialize)]
+struct MoveOnlyMessage(String);
 
-#[derive(Default)]
-struct MoveOnlyActor;
+struct MoveOnlyActor(ChannelSender<String>);
+
+impl ActorFactoryArgs<ChannelSender<String>> for MoveOnlyActor {
+    fn create_args(sender: ChannelSender<String>) -> Self {
+        Self(sender)
+    }
+}
 
 impl Actor for MoveOnlyActor {
     type Msg = MoveOnlyMessage;
 
     fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
-        let _ = msg.0.send("received without cloning".into());
+        let _ = self.0.send(msg.0);
     }
 }
 
 #[test]
 fn actor_messages_do_not_need_to_be_cloneable() {
     let system = ActorSystem::new().unwrap();
-    let actor = system.actor_of::<MoveOnlyActor>("move-only").unwrap();
     let (tx, rx) = mpsc::channel();
+    let actor = system
+        .actor_of_args::<MoveOnlyActor, _>("move-only", tx)
+        .unwrap();
 
-    actor.tell(MoveOnlyMessage(tx), None);
+    actor.tell(MoveOnlyMessage("received without cloning".into()), None);
 
     assert_eq!(
         rx.recv_timeout(Duration::from_secs(1)).unwrap(),
@@ -237,36 +245,42 @@ fn invalid_custom_config_returns_an_error() {
     ));
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum ContextTimerMessage {
-    Schedule(ChannelSender<()>, ChannelSender<()>),
-    Tick(ChannelSender<()>),
+    Schedule,
+    Tick,
 }
 
-#[derive(Default)]
-struct ContextTimerActor;
+struct ContextTimerActor {
+    event_tx: ChannelSender<()>,
+    scheduled_tx: ChannelSender<()>,
+}
+
+impl ActorFactoryArgs<(ChannelSender<()>, ChannelSender<()>)> for ContextTimerActor {
+    fn create_args((event_tx, scheduled_tx): (ChannelSender<()>, ChannelSender<()>)) -> Self {
+        Self {
+            event_tx,
+            scheduled_tx,
+        }
+    }
+}
 
 impl Actor for ContextTimerActor {
     type Msg = ContextTimerMessage;
 
     fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
         match msg {
-            ContextTimerMessage::Schedule(event_tx, scheduled_tx) => {
+            ContextTimerMessage::Schedule => {
                 let now = Utc::now();
                 let deadline = Utc
                     .timestamp_opt(now.timestamp() + 1, 150_000_000)
                     .single()
                     .unwrap();
-                ctx.schedule_at_time(
-                    deadline,
-                    ctx.myself(),
-                    None,
-                    ContextTimerMessage::Tick(event_tx),
-                );
-                let _ = scheduled_tx.send(());
+                ctx.schedule_at_time(deadline, ctx.myself(), None, ContextTimerMessage::Tick);
+                let _ = self.scheduled_tx.send(());
             }
-            ContextTimerMessage::Tick(event_tx) => {
-                let _ = event_tx.send(());
+            ContextTimerMessage::Tick => {
+                let _ = self.event_tx.send(());
             }
         }
     }
@@ -275,11 +289,11 @@ impl Actor for ContextTimerActor {
 #[test]
 fn context_schedule_at_time_preserves_subsecond_precision() {
     let system = ActorSystem::new().unwrap();
-    let actor = system
-        .actor_of::<ContextTimerActor>("context-timer")
-        .unwrap();
     let (event_tx, event_rx) = mpsc::channel();
     let (scheduled_tx, scheduled_rx) = mpsc::channel();
+    let actor = system
+        .actor_of_args::<ContextTimerActor, _>("context-timer", (event_tx, scheduled_tx))
+        .unwrap();
 
     let wait_deadline = Instant::now() + Duration::from_secs(3);
     while Utc::now().timestamp_subsec_millis() < 800 && Instant::now() < wait_deadline {
@@ -287,7 +301,7 @@ fn context_schedule_at_time_preserves_subsecond_precision() {
     }
     assert!(Utc::now().timestamp_subsec_millis() >= 800);
 
-    actor.tell(ContextTimerMessage::Schedule(event_tx, scheduled_tx), None);
+    actor.tell(ContextTimerMessage::Schedule, None);
     scheduled_rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
     assert!(

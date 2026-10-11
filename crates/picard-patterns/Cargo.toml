@@ -17,3 +17,4 @@ futures.workspace = true
 
 [dev-dependencies]
 picard-testkit.workspace = true
+serde.workspace = true

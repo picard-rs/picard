@@ -40,6 +40,7 @@ Other top-level items:
 - `system/logger.rs`: slog-based non-blocking logger.
 - `system/stats.rs` (feature `stats`): padded atomic counters behind `ActorSystem::stats()`. Recorded in `kernel.rs` (create/restart/terminate) and the send funnels in `actor_cell.rs` (`send_msg`, `send_any_msg`, `send_sys_msg`).
 - Feature `tracing`: `#[cfg(feature = "tracing")]` events at the same lifecycle points, panics (`Sentinel`), supervision, and a `TRACE` `recv` span in `mailbox.rs`. Both features are documented in `web/docs/diagnostics.md`; test them with `cargo test -p picard --all-features`.
+- Feature `serde`: `Message` (in `lib.rs`) becomes `LocalMessage + Serialize + DeserializeOwned`. The runtime itself only requires `LocalMessage`. The `Message` bound is enforced where users create actors (`ActorRefFactory`/`TmpActorRefFactory` methods, the public `sys_actor_of*`). Picard's own actors, whose messages hold actor refs, are created through the hidden `ActorRefFactory::local_actor_of_props` or the provider. `#[actor]` and `EntityMsg` wrap their enums in the hidden `__actor_msg_enum!` macro, which adds the serde derives (`#[serde(bound = "")]`). Test, bench and example messages must stay serializable: pass channels and actor refs through `actor_of_args`, not in messages. The `living-city` demo does not support `picard/serde`. Documented in `web/docs/messaging.md`.
 - `actor.rs`, `actor/`: `Actor` trait, `Props`, `ActorRef`/`BasicActorRef`, `ActorCell`, paths and URIs, channels, selection.
 - `kernel.rs`, `kernel/`: per-actor kernel task, `mailbox.rs` (user and system queues, scheduling flags), `queue.rs` (crossbeam channel), `provider.rs` (actor creation, path registry), `kernel_ref.rs`.
 - `validate.rs`: actor name and path validation (plain char checks, no regex).
@@ -61,7 +62,8 @@ Other top-level items:
 ```sh
 cargo build --workspace --all-targets
 cargo test --workspace
-cargo test -p picard --all-features                     # includes the `tracing` and `stats` features
+cargo test -p picard --all-features                     # includes the `tracing`, `stats` and `serde` features
+cargo test --workspace --exclude living-city --features picard/serde   # the demo doesn't support `serde`
 cargo clippy --workspace --all-targets -- -D warnings   # must stay clean
 cargo fmt --all
 cargo bench -p picard --bench runtime                   # Criterion: message throughput, round trip, creation

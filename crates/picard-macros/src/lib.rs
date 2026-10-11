@@ -25,9 +25,11 @@ impl MsgTypes {
         });
 
         quote! {
-            #[derive(Clone, Debug)]
-            pub enum #name {
-                #(#vars)*
+            ::picard::__actor_msg_enum! {
+                #[derive(Clone, Debug)]
+                pub enum #name {
+                    #(#vars)*
+                }
             }
         }
     }

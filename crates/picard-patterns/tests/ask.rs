@@ -2,6 +2,7 @@ use futures::executor::block_on;
 use futures::future::RemoteHandle;
 use picard::actors::*;
 use picard_patterns::ask::ask;
+use serde::{Deserialize, Serialize};
 
 #[derive(Default)]
 struct EchoActor;
@@ -33,7 +34,7 @@ fn ask_actor() {
 
 #[test]
 fn stress_test() {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     enum Protocol {
         Foo,
         FooResult,

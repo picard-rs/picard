@@ -1,7 +1,7 @@
 use std::{collections::HashMap, hash::Hash};
 
 use crate::{
-    Message,
+    LocalMessage,
     actor::actor_ref::SystemTell,
     actor::{
         Actor, ActorRef, ActorRefFactory, ActorReference, BasicActorRef, BoxedTell, Context,
@@ -17,11 +17,11 @@ pub type ChannelCtx<Msg> = Context<ChannelMsg<Msg>>;
 pub type ChannelRef<Msg> = ActorRef<ChannelMsg<Msg>>;
 
 /// A specialized actor for providing Publish/Subscribe capabilities for user level messages
-pub struct Channel<Msg: Message> {
+pub struct Channel<Msg: LocalMessage> {
     subs: Subs<Msg>,
 }
 
-impl<Msg: Message> Default for Channel<Msg> {
+impl<Msg: LocalMessage> Default for Channel<Msg> {
     fn default() -> Self {
         Self {
             subs: HashMap::new(),
@@ -31,7 +31,7 @@ impl<Msg: Message> Default for Channel<Msg> {
 
 impl<Msg> Actor for Channel<Msg>
 where
-    Msg: Message + Clone,
+    Msg: LocalMessage + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -68,7 +68,7 @@ where
 
 impl<Msg> Receive<ChannelMsg<Msg>> for Channel<Msg>
 where
-    Msg: Message + Clone,
+    Msg: LocalMessage + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -84,7 +84,7 @@ where
 
 impl<Msg> Receive<Subscribe<Msg>> for Channel<Msg>
 where
-    Msg: Message + Clone,
+    Msg: LocalMessage + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -96,7 +96,7 @@ where
 
 impl<Msg> Receive<Unsubscribe<Msg>> for Channel<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -107,7 +107,7 @@ where
 
 impl<Msg> Receive<UnsubscribeAll<Msg>> for Channel<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -122,7 +122,7 @@ where
 
 impl<Msg> Receive<Publish<Msg>> for Channel<Msg>
 where
-    Msg: Message + Clone,
+    Msg: LocalMessage + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -234,30 +234,30 @@ pub struct DeadLetter {
 }
 
 #[derive(Debug, Clone)]
-pub struct Subscribe<Msg: Message> {
+pub struct Subscribe<Msg: LocalMessage> {
     pub topic: Topic,
     pub actor: BoxedTell<Msg>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Unsubscribe<Msg: Message> {
+pub struct Unsubscribe<Msg: LocalMessage> {
     pub topic: Topic,
     pub actor: BoxedTell<Msg>,
 }
 
 #[derive(Debug, Clone)]
-pub struct UnsubscribeAll<Msg: Message> {
+pub struct UnsubscribeAll<Msg: LocalMessage> {
     pub actor: BoxedTell<Msg>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Publish<Msg: Message> {
+pub struct Publish<Msg: LocalMessage> {
     pub topic: Topic,
     pub msg: Msg,
 }
 
 #[derive(Debug, Clone)]
-pub enum ChannelMsg<Msg: Message> {
+pub enum ChannelMsg<Msg: LocalMessage> {
     /// Publish message
     Publish(Publish<Msg>),
 
@@ -272,28 +272,28 @@ pub enum ChannelMsg<Msg: Message> {
 }
 
 // publish
-impl<Msg: Message> From<Publish<Msg>> for ChannelMsg<Msg> {
+impl<Msg: LocalMessage> From<Publish<Msg>> for ChannelMsg<Msg> {
     fn from(val: Publish<Msg>) -> Self {
         Self::Publish(val)
     }
 }
 
 // subscribe
-impl<Msg: Message> From<Subscribe<Msg>> for ChannelMsg<Msg> {
+impl<Msg: LocalMessage> From<Subscribe<Msg>> for ChannelMsg<Msg> {
     fn from(val: Subscribe<Msg>) -> Self {
         Self::Subscribe(val)
     }
 }
 
 // unsubscribe
-impl<Msg: Message> From<Unsubscribe<Msg>> for ChannelMsg<Msg> {
+impl<Msg: LocalMessage> From<Unsubscribe<Msg>> for ChannelMsg<Msg> {
     fn from(val: Unsubscribe<Msg>) -> Self {
         Self::Unsubscribe(val)
     }
 }
 
 // unsubscribe
-impl<Msg: Message> From<UnsubscribeAll<Msg>> for ChannelMsg<Msg> {
+impl<Msg: LocalMessage> From<UnsubscribeAll<Msg>> for ChannelMsg<Msg> {
     fn from(val: UnsubscribeAll<Msg>) -> Self {
         Self::UnsubscribeAll(val)
     }
@@ -361,7 +361,7 @@ impl From<SysTopic> for Topic {
 /// example because `name` is invalid or already in use.
 pub fn channel<Msg>(name: &str, fact: &impl ActorRefFactory) -> Result<ChannelRef<Msg>, CreateError>
 where
-    Msg: Message + Clone,
+    Msg: LocalMessage + Clone,
 {
-    fact.actor_of::<Channel<Msg>>(name)
+    fact.local_actor_of_props(name, crate::actor::Props::produce::<Channel<Msg>>())
 }

@@ -13,7 +13,7 @@ use futures::{Future, future::RemoteHandle, task::SpawnError};
 use uuid::Uuid;
 
 use crate::{
-    AnyMessage, Envelope, Message,
+    AnyMessage, Envelope, LocalMessage, Message,
     actor::actor_ref::SystemTell,
     actor::{
         Actor, ActorArgs, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference,
@@ -250,7 +250,7 @@ impl ActorCell {
     }
 }
 
-impl<Msg: Message> From<ExtendedCell<Msg>> for ActorCell {
+impl<Msg: LocalMessage> From<ExtendedCell<Msg>> for ActorCell {
     fn from(cell: ExtendedCell<Msg>) -> Self {
         cell.cell
     }
@@ -293,6 +293,7 @@ impl TmpActorRefFactory for ActorCell {
     where
         Args: ActorArgs,
         A: ActorFactoryArgs<Args>,
+        <A as Actor>::Msg: Message,
     {
         let name = rand::random::<u64>();
         let _name = format!("{name}");
@@ -304,12 +305,12 @@ impl TmpActorRefFactory for ActorCell {
     }
 }
 
-pub struct ExtendedCell<Msg: Message> {
+pub struct ExtendedCell<Msg: LocalMessage> {
     cell: ActorCell,
     mailbox: MailboxSender<Msg>,
 }
 
-impl<Msg: Message> Clone for ExtendedCell<Msg> {
+impl<Msg: LocalMessage> Clone for ExtendedCell<Msg> {
     fn clone(&self) -> Self {
         Self {
             cell: self.cell.clone(),
@@ -320,7 +321,7 @@ impl<Msg: Message> Clone for ExtendedCell<Msg> {
 
 impl<Msg> ExtendedCell<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     pub(crate) fn new(
         uri: ActorUri,
@@ -444,7 +445,7 @@ where
     }
 }
 
-impl<Msg: Message> fmt::Debug for ExtendedCell<Msg> {
+impl<Msg: LocalMessage> fmt::Debug for ExtendedCell<Msg> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ExtendedCell[{:?}]", self.uri())
     }
@@ -471,7 +472,7 @@ fn post_stop<A: Actor>(actor: &mut Option<A>) {
 ///
 /// Since `Context` is specific to an actor and its functions
 /// it is not cloneable.
-pub struct Context<Msg: Message> {
+pub struct Context<Msg: LocalMessage> {
     pub myself: ActorRef<Msg>,
     pub system: ActorSystem,
     pub(crate) kernel: KernelRef,
@@ -479,7 +480,7 @@ pub struct Context<Msg: Message> {
 
 impl<Msg> Context<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     /// Returns the `ActorRef` of the current actor.
     #[must_use]
@@ -498,7 +499,7 @@ where
     }
 }
 
-impl<Msg: Message> ActorRefFactory for Context<Msg> {
+impl<Msg: LocalMessage> ActorRefFactory for Context<Msg> {
     fn actor_of_props<A>(
         &self,
         name: &str,
@@ -506,6 +507,7 @@ impl<Msg: Message> ActorRefFactory for Context<Msg> {
     ) -> Result<ActorRef<A::Msg>, CreateError>
     where
         A: Actor,
+        <A as Actor>::Msg: Message,
     {
         self.system
             .provider
@@ -515,6 +517,7 @@ impl<Msg: Message> ActorRefFactory for Context<Msg> {
     fn actor_of<A>(&self, name: &str) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
         A: ActorFactory,
+        <A as Actor>::Msg: Message,
     {
         self.system.provider.create_actor(
             Props::produce::<A>(),
@@ -532,6 +535,7 @@ impl<Msg: Message> ActorRefFactory for Context<Msg> {
     where
         Args: ActorArgs,
         A: ActorFactoryArgs<Args>,
+        <A as Actor>::Msg: Message,
     {
         self.system.provider.create_actor(
             Props::new_args::<A, _>(args),
@@ -541,6 +545,19 @@ impl<Msg: Message> ActorRefFactory for Context<Msg> {
         )
     }
 
+    fn local_actor_of_props<A>(
+        &self,
+        name: &str,
+        props: BoxActorProd<A>,
+    ) -> Result<ActorRef<A::Msg>, CreateError>
+    where
+        A: Actor,
+    {
+        self.system
+            .provider
+            .create_actor(props, name, &self.myself().into(), &self.system)
+    }
+
     fn stop(&self, actor: impl ActorReference) {
         actor.stop();
     }
@@ -548,7 +565,7 @@ impl<Msg: Message> ActorRefFactory for Context<Msg> {
 
 impl<Msg> ActorSelectionFactory for Context<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn select(&self, path: &str) -> Result<ActorSelection, InvalidPath> {
         let (anchor, path_str) = if path.starts_with('/') {
@@ -570,7 +587,7 @@ where
 
 impl<Msg> Run for Context<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn run<Fut>(&self, future: Fut) -> Result<RemoteHandle<<Fut as Future>::Output>, SpawnError>
     where
@@ -583,7 +600,7 @@ where
 
 impl<Msg> Timer for Context<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn schedule<T, M>(
         &self,
@@ -594,8 +611,8 @@ where
         msg: T,
     ) -> ScheduleId
     where
-        T: Message + Into<M>,
-        M: Message + Clone,
+        T: LocalMessage + Into<M>,
+        M: LocalMessage + Clone,
     {
         let id = Uuid::new_v4();
         let msg: M = msg.into();
@@ -621,8 +638,8 @@ where
         msg: T,
     ) -> ScheduleId
     where
-        T: Message + Into<M>,
-        M: Message,
+        T: LocalMessage + Into<M>,
+        M: LocalMessage,
     {
         let id = Uuid::new_v4();
         let msg: M = msg.into();
@@ -647,8 +664,8 @@ where
         msg: T,
     ) -> ScheduleId
     where
-        T: Message + Into<M>,
-        M: Message,
+        T: LocalMessage + Into<M>,
+        M: LocalMessage,
     {
         let delay = crate::system::delay_until(time, Utc::now());
 

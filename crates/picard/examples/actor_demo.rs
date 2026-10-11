@@ -4,28 +4,37 @@ use std::{
     time::{Duration, Instant},
 };
 
-use picard::actors::{Actor, ActorRefFactory, ActorSystem, Context, Sender, Tell};
+use picard::actors::{
+    Actor, ActorFactoryArgs, ActorRefFactory, ActorSystem, Context, Sender, Tell,
+};
+use serde::{Deserialize, Serialize};
 
 const ITEMS: u64 = 100_000;
 const WORK_PER_ITEM: u32 = 100;
 const MAX_WORKERS: usize = 4;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Work {
     start: u64,
     end: u64,
+}
+
+struct Worker {
     reply_to: mpsc::Sender<u64>,
 }
 
-#[derive(Default)]
-struct Worker;
+impl ActorFactoryArgs<mpsc::Sender<u64>> for Worker {
+    fn create_args(reply_to: mpsc::Sender<u64>) -> Self {
+        Self { reply_to }
+    }
+}
 
 impl Actor for Worker {
     type Msg = Work;
 
     fn recv(&mut self, _: &Context<Self::Msg>, work: Self::Msg, _: Sender) {
         let result = calculate(work.start, work.end);
-        work.reply_to
+        self.reply_to
             .send(result)
             .expect("demo receiver should stay connected");
     }
@@ -50,10 +59,11 @@ fn main() {
         .min(MAX_WORKERS)
         .min(usize::try_from(ITEMS).unwrap_or(usize::MAX));
     let system = ActorSystem::with_name("efficiency-demo").expect("start actor system");
+    let (reply_to, replies) = mpsc::channel();
     let actors: Vec<_> = (0..workers)
         .map(|index| {
             system
-                .actor_of::<Worker>(&format!("worker-{index}"))
+                .actor_of_args::<Worker, _>(&format!("worker-{index}"), reply_to.clone())
                 .expect("create worker actor")
         })
         .collect();
@@ -63,24 +73,14 @@ fn main() {
     let sequential_time = sequential_start.elapsed();
 
     let parallel_start = Instant::now();
-    let mut replies = Vec::with_capacity(workers);
     for (index, actor) in actors.iter().enumerate() {
         let start = ITEMS * index as u64 / workers as u64;
         let end = ITEMS * (index + 1) as u64 / workers as u64;
-        let (reply_to, reply_from) = mpsc::channel();
-        actor.tell(
-            Work {
-                start,
-                end,
-                reply_to,
-            },
-            None,
-        );
-        replies.push(reply_from);
+        actor.tell(Work { start, end }, None);
     }
 
-    let parallel_result = replies.into_iter().fold(0_u64, |sum, reply| {
-        sum.wrapping_add(reply.recv().expect("receive worker result"))
+    let parallel_result = (0..workers).fold(0_u64, |sum, _| {
+        sum.wrapping_add(replies.recv().expect("receive worker result"))
     });
     let parallel_time = parallel_start.elapsed();
 

@@ -10,8 +10,9 @@ use std::{
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use picard::actors::{
     Actor, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference, ActorSystem, BasicActorRef,
-    Context, DispatcherConfig, LogConfig, Message, PicardConfig, Sender, Tell, Timer,
+    Context, DispatcherConfig, LocalMessage, LogConfig, PicardConfig, Sender, Tell, Timer,
 };
+use serde::{Deserialize, Serialize};
 
 fn benchmark_system() -> ActorSystem {
     let config = PicardConfig {
@@ -29,7 +30,7 @@ fn benchmark_system() -> ActorSystem {
     ActorSystem::with_config("actor-suite-bench", config).unwrap()
 }
 
-fn stop_actor<Msg: Message>(system: &ActorSystem, actor: &ActorRef<Msg>) {
+fn stop_actor<Msg: LocalMessage>(system: &ActorSystem, actor: &ActorRef<Msg>) {
     let name = actor.name().to_owned();
     actor.stop();
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -53,36 +54,43 @@ fn wait_for_count(rx: &Receiver<()>, count: usize) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum TreeMessage {
-    Grow(u32, TreeReply),
+    Grow(u32),
     Result(usize),
 }
 
-#[derive(Clone, Debug)]
-enum TreeReply {
-    Parent(BasicActorRef),
-    Done(ChannelSender<usize>),
+/// The root reports to `done`; every other node reports to its parent actor.
+struct TreeActor {
+    done: Option<ChannelSender<usize>>,
+    pending: u8,
+    total: usize,
 }
 
-impl TreeReply {
-    fn send(&self, count: usize) {
-        match self {
-            TreeReply::Parent(parent) => {
-                let _ = parent.try_tell(TreeMessage::Result(count), None);
-            }
-            TreeReply::Done(done) => {
-                let _ = done.send(count);
-            }
+impl ActorFactoryArgs<Option<ChannelSender<usize>>> for TreeActor {
+    fn create_args(done: Option<ChannelSender<usize>>) -> Self {
+        Self {
+            done,
+            pending: 0,
+            total: 0,
         }
     }
 }
 
-#[derive(Default)]
-struct TreeActor {
-    reply: Option<TreeReply>,
-    pending: u8,
-    total: usize,
+impl TreeActor {
+    fn reply(&self, ctx: &Context<TreeMessage>, count: usize) {
+        match &self.done {
+            Some(done) => {
+                let _ = done.send(count);
+            }
+            None => {
+                let _ = ctx
+                    .myself()
+                    .parent()
+                    .try_tell(TreeMessage::Result(count), None);
+            }
+        }
+    }
 }
 
 impl Actor for TreeActor {
@@ -90,28 +98,24 @@ impl Actor for TreeActor {
 
     fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
         match msg {
-            TreeMessage::Grow(level, reply) if level <= 1 => {
-                reply.send(1);
+            TreeMessage::Grow(level) if level <= 1 => {
+                self.reply(ctx, 1);
                 ctx.myself().stop();
             }
-            TreeMessage::Grow(level, reply) => {
-                self.reply = Some(reply);
+            TreeMessage::Grow(level) => {
                 self.pending = 2;
                 self.total = 1;
                 for name in ["left", "right"] {
-                    ctx.actor_of::<TreeActor>(name).unwrap().tell(
-                        TreeMessage::Grow(level - 1, TreeReply::Parent(ctx.myself().into())),
-                        None,
-                    );
+                    ctx.actor_of_args::<TreeActor, _>(name, None)
+                        .unwrap()
+                        .tell(TreeMessage::Grow(level - 1), None);
                 }
             }
             TreeMessage::Result(count) => {
                 self.total += count;
                 self.pending -= 1;
                 if self.pending == 0 {
-                    if let Some(reply) = &self.reply {
-                        reply.send(self.total);
-                    }
+                    self.reply(ctx, self.total);
                     ctx.myself().stop();
                 }
             }
@@ -128,8 +132,10 @@ fn bench_actor_creation(c: &mut Criterion, system: &ActorSystem) {
             for _ in 0..iterations {
                 let id = next_id.fetch_add(1, Ordering::Relaxed);
                 let start = Instant::now();
-                let root = system.actor_of::<TreeActor>(&format!("tree-{id}")).unwrap();
-                root.tell(TreeMessage::Grow(5, TreeReply::Done(done_tx.clone())), None);
+                let root = system
+                    .actor_of_args::<TreeActor, _>(&format!("tree-{id}"), Some(done_tx.clone()))
+                    .unwrap();
+                root.tell(TreeMessage::Grow(5), None);
                 let total = done_rx
                     .recv_timeout(Duration::from_secs(30))
                     .expect("actor benchmark timed out waiting for completion");
@@ -141,14 +147,19 @@ fn bench_actor_creation(c: &mut Criterion, system: &ActorSystem) {
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum MailboxMessage {
     Data,
-    Barrier(ChannelSender<()>),
+    Barrier,
 }
 
-#[derive(Default)]
-struct MailboxReceiver;
+struct MailboxReceiver(ChannelSender<()>);
+
+impl ActorFactoryArgs<ChannelSender<()>> for MailboxReceiver {
+    fn create_args(done: ChannelSender<()>) -> Self {
+        Self(done)
+    }
+}
 
 impl Actor for MailboxReceiver {
     type Msg = MailboxMessage;
@@ -158,39 +169,39 @@ impl Actor for MailboxReceiver {
             MailboxMessage::Data => {
                 black_box(());
             }
-            MailboxMessage::Barrier(done) => {
-                let _ = done.send(());
+            MailboxMessage::Barrier => {
+                let _ = self.0.send(());
             }
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum ProducerMessage {
-    SendBatch {
-        receiver: ActorRef<MailboxMessage>,
-        count: usize,
-        done: ChannelSender<()>,
-    },
+    SendBatch { count: usize },
 }
 
-#[derive(Default)]
-struct MailboxProducer;
+struct MailboxProducer {
+    receiver: ActorRef<MailboxMessage>,
+    done: ChannelSender<()>,
+}
+
+impl ActorFactoryArgs<(ActorRef<MailboxMessage>, ChannelSender<()>)> for MailboxProducer {
+    fn create_args((receiver, done): (ActorRef<MailboxMessage>, ChannelSender<()>)) -> Self {
+        Self { receiver, done }
+    }
+}
 
 impl Actor for MailboxProducer {
     type Msg = ProducerMessage;
 
     fn recv(&mut self, _: &Context<Self::Msg>, message: Self::Msg, _: Sender) {
         match message {
-            ProducerMessage::SendBatch {
-                receiver,
-                count,
-                done,
-            } => {
+            ProducerMessage::SendBatch { count } => {
                 for _ in 0..count {
-                    receiver.tell(MailboxMessage::Data, None);
+                    self.receiver.tell(MailboxMessage::Data, None);
                 }
-                let _ = done.send(());
+                let _ = self.done.send(());
             }
         }
     }
@@ -200,18 +211,21 @@ fn bench_mailbox_performance(c: &mut Criterion, system: &ActorSystem) {
     const PRODUCERS: usize = 4;
     const MESSAGES_PER_PRODUCER: usize = 256;
 
+    let (producer_tx, producer_rx) = mpsc::channel();
+    let (barrier_tx, barrier_rx) = mpsc::channel();
     let receiver = system
-        .actor_of::<MailboxReceiver>("mailbox-suite-receiver")
+        .actor_of_args::<MailboxReceiver, _>("mailbox-suite-receiver", barrier_tx)
         .unwrap();
     let producers: Vec<_> = (0..PRODUCERS)
         .map(|index| {
             system
-                .actor_of::<MailboxProducer>(&format!("mailbox-suite-producer-{index}"))
+                .actor_of_args::<MailboxProducer, _>(
+                    &format!("mailbox-suite-producer-{index}"),
+                    (receiver.clone(), producer_tx.clone()),
+                )
                 .unwrap()
         })
         .collect();
-    let (producer_tx, producer_rx) = mpsc::channel();
-    let (barrier_tx, barrier_rx) = mpsc::channel();
 
     let mut group = c.benchmark_group("mailbox_performance");
     group.throughput(Throughput::Elements(
@@ -224,15 +238,13 @@ fn bench_mailbox_performance(c: &mut Criterion, system: &ActorSystem) {
                 for producer in &producers {
                     producer.tell(
                         ProducerMessage::SendBatch {
-                            receiver: receiver.clone(),
                             count: MESSAGES_PER_PRODUCER,
-                            done: producer_tx.clone(),
                         },
                         None,
                     );
                 }
                 wait_for_count(&producer_rx, PRODUCERS);
-                receiver.tell(MailboxMessage::Barrier(barrier_tx.clone()), None);
+                receiver.tell(MailboxMessage::Barrier, None);
                 barrier_rx
                     .recv_timeout(Duration::from_secs(30))
                     .expect("mailbox receiver stopped before barrier");
@@ -248,7 +260,7 @@ fn bench_mailbox_performance(c: &mut Criterion, system: &ActorSystem) {
     stop_actor(system, &receiver);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MandelbrotRow {
     y: usize,
     width: usize,
@@ -337,19 +349,24 @@ fn bench_mandelbrot(c: &mut Criterion, system: &ActorSystem) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum MatchMessage {
     One(i32),
     Two(f64),
     Three([i32; 1]),
-    Four(i32, &'static str),
+    Four(i32, String),
     Five(i32, i32, i32),
-    Six(i32, f64, &'static str),
-    Barrier(ChannelSender<()>),
+    Six(i32, f64, String),
+    Barrier,
 }
 
-#[derive(Default)]
-struct MatchingActor;
+struct MatchingActor(ChannelSender<()>);
+
+impl ActorFactoryArgs<ChannelSender<()>> for MatchingActor {
+    fn create_args(done: ChannelSender<()>) -> Self {
+        Self(done)
+    }
+}
 
 impl Actor for MatchingActor {
     type Msg = MatchMessage;
@@ -374,18 +391,18 @@ impl Actor for MatchingActor {
             MatchMessage::Six(a, b, c) => {
                 black_box((a, b, c));
             }
-            MatchMessage::Barrier(done) => {
-                let _ = done.send(());
+            MatchMessage::Barrier => {
+                let _ = self.0.send(());
             }
         }
     }
 }
 
 fn bench_matching(c: &mut Criterion, system: &ActorSystem) {
-    let actor = system
-        .actor_of::<MatchingActor>("matching-suite-actor")
-        .unwrap();
     let (done_tx, done_rx) = mpsc::channel();
+    let actor = system
+        .actor_of_args::<MatchingActor, _>("matching-suite-actor", done_tx)
+        .unwrap();
     let mut group = c.benchmark_group("message_matching");
     group.throughput(Throughput::Elements(6));
     group.bench_function("six_message_shapes", |b| {
@@ -395,10 +412,10 @@ fn bench_matching(c: &mut Criterion, system: &ActorSystem) {
                 actor.tell(MatchMessage::One(1), None);
                 actor.tell(MatchMessage::Two(2.0), None);
                 actor.tell(MatchMessage::Three([3]), None);
-                actor.tell(MatchMessage::Four(4, "four"), None);
+                actor.tell(MatchMessage::Four(4, "four".to_owned()), None);
                 actor.tell(MatchMessage::Five(5, 5, 5), None);
-                actor.tell(MatchMessage::Six(6, 6.0, "six"), None);
-                actor.tell(MatchMessage::Barrier(done_tx.clone()), None);
+                actor.tell(MatchMessage::Six(6, 6.0, "six".to_owned()), None);
+                actor.tell(MatchMessage::Barrier, None);
                 done_rx
                     .recv_timeout(Duration::from_secs(30))
                     .expect("matching actor stopped before processing messages");
@@ -410,37 +427,49 @@ fn bench_matching(c: &mut Criterion, system: &ActorSystem) {
     stop_actor(system, &actor);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum RingMessage {
-    SetNext(BasicActorRef),
+    /// Links this ring member to the sibling actor with the given name.
+    SetNext(String),
     Token {
         remaining: usize,
-        done: ChannelSender<()>,
     },
 }
 
-#[derive(Default)]
 struct RingActor {
     next: Option<BasicActorRef>,
+    done: ChannelSender<()>,
+}
+
+impl ActorFactoryArgs<ChannelSender<()>> for RingActor {
+    fn create_args(done: ChannelSender<()>) -> Self {
+        Self { next: None, done }
+    }
 }
 
 impl Actor for RingActor {
     type Msg = RingMessage;
 
-    fn recv(&mut self, _: &Context<Self::Msg>, message: Self::Msg, _: Sender) {
+    fn recv(&mut self, ctx: &Context<Self::Msg>, message: Self::Msg, _: Sender) {
         match message {
-            RingMessage::SetNext(next) => self.next = Some(next),
-            RingMessage::Token { remaining: 0, done } => {
-                let _ = done.send(());
+            RingMessage::SetNext(name) => {
+                self.next = ctx
+                    .myself()
+                    .parent()
+                    .children()
+                    .find(|child| child.name() == name);
+                assert!(self.next.is_some(), "ring actor {name} not found");
             }
-            RingMessage::Token { remaining, done } => {
+            RingMessage::Token { remaining: 0 } => {
+                let _ = self.done.send(());
+            }
+            RingMessage::Token { remaining } => {
                 self.next
                     .as_ref()
                     .expect("ring actor not linked")
                     .try_tell(
                         RingMessage::Token {
                             remaining: remaining - 1,
-                            done,
                         },
                         None,
                     )
@@ -450,7 +479,7 @@ impl Actor for RingActor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum FactorMessage {
     Factorize(u64),
 }
@@ -496,20 +525,20 @@ fn bench_mixed_case(c: &mut Criterion, system: &ActorSystem) {
     const TOKEN_HOPS: usize = 64;
     const FACTORIZATION_INPUT: u64 = 1009 * 1013;
 
+    let (ring_tx, ring_rx) = mpsc::channel();
     let ring: Vec<_> = (0..RING_SIZE)
         .map(|index| {
             system
-                .actor_of::<RingActor>(&format!("mixed-ring-{index}"))
+                .actor_of_args::<RingActor, _>(&format!("mixed-ring-{index}"), ring_tx.clone())
                 .unwrap()
         })
         .collect();
     for index in 0..RING_SIZE {
         ring[index].tell(
-            RingMessage::SetNext(ring[(index + 1) % RING_SIZE].clone().into()),
+            RingMessage::SetNext(ring[(index + 1) % RING_SIZE].name().to_owned()),
             None,
         );
     }
-    let (ring_tx, ring_rx) = mpsc::channel();
     let (factor_tx, factor_rx) = mpsc::channel();
     let factor_actor = system
         .actor_of_args::<FactorActor, _>("mixed-factor-actor", factor_tx)
@@ -522,7 +551,6 @@ fn bench_mixed_case(c: &mut Criterion, system: &ActorSystem) {
                 ring[0].tell(
                     RingMessage::Token {
                         remaining: TOKEN_HOPS,
-                        done: ring_tx.clone(),
                     },
                     None,
                 );
@@ -547,26 +575,31 @@ fn bench_mixed_case(c: &mut Criterion, system: &ActorSystem) {
     }
 }
 
-#[derive(Debug)]
-struct ScheduledMessage(ChannelSender<()>);
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ScheduledMessage;
 
-#[derive(Default)]
-struct ScheduledActor;
+struct ScheduledActor(ChannelSender<()>);
+
+impl ActorFactoryArgs<ChannelSender<()>> for ScheduledActor {
+    fn create_args(done: ChannelSender<()>) -> Self {
+        Self(done)
+    }
+}
 
 impl Actor for ScheduledActor {
     type Msg = ScheduledMessage;
 
-    fn recv(&mut self, _: &Context<Self::Msg>, message: Self::Msg, _: Sender) {
-        let _ = message.0.send(());
+    fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {
+        let _ = self.0.send(());
     }
 }
 
 fn bench_scheduling(c: &mut Criterion, system: &ActorSystem) {
     const JOBS: usize = 8;
-    let actor = system
-        .actor_of::<ScheduledActor>("scheduler-suite-actor")
-        .unwrap();
     let (done_tx, done_rx) = mpsc::channel();
+    let actor = system
+        .actor_of_args::<ScheduledActor, _>("scheduler-suite-actor", done_tx)
+        .unwrap();
 
     let mut group = c.benchmark_group("scheduling");
     group.throughput(Throughput::Elements(JOBS as u64));
@@ -579,7 +612,7 @@ fn bench_scheduling(c: &mut Criterion, system: &ActorSystem) {
                         Duration::from_millis(2),
                         actor.clone(),
                         None,
-                        ScheduledMessage(done_tx.clone()),
+                        ScheduledMessage,
                     );
                 }
                 wait_for_count(&done_rx, JOBS);

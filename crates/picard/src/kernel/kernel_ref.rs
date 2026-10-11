@@ -3,7 +3,7 @@ use std::sync::Arc;
 use futures::channel::mpsc::UnboundedSender;
 
 use crate::{
-    AnyMessage, Envelope, Message,
+    AnyMessage, Envelope, LocalMessage,
     actor::{MsgError, MsgResult},
     kernel::{
         KernelMsg,
@@ -46,7 +46,7 @@ pub fn dispatch<Msg>(
     kernel: &KernelRef,
 ) -> MsgResult<Envelope<Msg>>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     match mbox.try_enqueue(msg) {
         Ok(()) => {

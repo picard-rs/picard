@@ -1,18 +1,18 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
-use crate::{Envelope, Message};
+use crate::{Envelope, LocalMessage};
 
-pub fn queue<Msg: Message>() -> (QueueWriter<Msg>, QueueReader<Msg>) {
+pub fn queue<Msg: LocalMessage>() -> (QueueWriter<Msg>, QueueReader<Msg>) {
     let (tx, rx) = unbounded::<Envelope<Msg>>();
 
     (QueueWriter { tx }, QueueReader { rx })
 }
 
-pub struct QueueWriter<Msg: Message> {
+pub struct QueueWriter<Msg: LocalMessage> {
     tx: Sender<Envelope<Msg>>,
 }
 
-impl<Msg: Message> Clone for QueueWriter<Msg> {
+impl<Msg: LocalMessage> Clone for QueueWriter<Msg> {
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
@@ -20,7 +20,7 @@ impl<Msg: Message> Clone for QueueWriter<Msg> {
     }
 }
 
-impl<Msg: Message> QueueWriter<Msg> {
+impl<Msg: LocalMessage> QueueWriter<Msg> {
     pub fn try_enqueue(&self, msg: Envelope<Msg>) -> EnqueueResult<Msg> {
         self.tx.send(msg).map_err(|e| EnqueueError {
             msg: e.into_inner(),
@@ -28,11 +28,11 @@ impl<Msg: Message> QueueWriter<Msg> {
     }
 }
 
-pub struct QueueReader<Msg: Message> {
+pub struct QueueReader<Msg: LocalMessage> {
     rx: Receiver<Envelope<Msg>>,
 }
 
-impl<Msg: Message> QueueReader<Msg> {
+impl<Msg: LocalMessage> QueueReader<Msg> {
     pub fn try_dequeue(&self) -> DequeueResult<Envelope<Msg>> {
         self.rx.try_recv().map_err(|_| QueueEmpty)
     }

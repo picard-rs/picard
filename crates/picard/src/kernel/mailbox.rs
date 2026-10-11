@@ -5,7 +5,7 @@ use std::sync::{
 use std::thread;
 
 use crate::{
-    AnyMessage, Envelope, Message,
+    AnyMessage, Envelope, LocalMessage,
     actor::actor_cell::ExtendedCell,
     actor::actor_ref::SystemTell,
     actor::{Actor, ActorReference, BasicActorRef, Context, DeadLetter, Publish, Sender, Tell},
@@ -40,12 +40,12 @@ pub trait AnySender: Send + Sync {
     fn is_sched(&self) -> bool;
 }
 
-pub struct MailboxSender<Msg: Message> {
+pub struct MailboxSender<Msg: LocalMessage> {
     queue: QueueWriter<Msg>,
     scheduled: Arc<AtomicBool>,
 }
 
-impl<Msg: Message> Clone for MailboxSender<Msg> {
+impl<Msg: LocalMessage> Clone for MailboxSender<Msg> {
     fn clone(&self) -> Self {
         Self {
             queue: self.queue.clone(),
@@ -56,7 +56,7 @@ impl<Msg: Message> Clone for MailboxSender<Msg> {
 
 impl<Msg> MailboxSender<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     pub fn try_enqueue(&self, msg: Envelope<Msg>) -> EnqueueResult<Msg> {
         self.queue.try_enqueue(msg)
@@ -65,7 +65,7 @@ where
 
 impl<Msg> MailboxSchedule for MailboxSender<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn set_scheduled(&self, b: bool) {
         self.scheduled.store(b, Ordering::Relaxed);
@@ -78,7 +78,7 @@ where
 
 impl<Msg> AnySender for MailboxSender<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn try_any_enqueue(&self, msg: &mut AnyMessage, sender: Sender) -> Result<(), AnyEnqueueError> {
         let actual = msg.take().map_err(|_| AnyEnqueueError)?;
@@ -99,11 +99,11 @@ where
 }
 
 #[derive(Clone)]
-pub struct Mailbox<Msg: Message> {
+pub struct Mailbox<Msg: LocalMessage> {
     inner: Arc<MailboxInner<Msg>>,
 }
 
-pub struct MailboxInner<Msg: Message> {
+pub struct MailboxInner<Msg: LocalMessage> {
     msg_process_limit: u32,
     queue: QueueReader<Msg>,
     sys_queue: QueueReader<SystemMsg>,
@@ -111,7 +111,7 @@ pub struct MailboxInner<Msg: Message> {
     scheduled: Arc<AtomicBool>,
 }
 
-impl<Msg: Message> Mailbox<Msg> {
+impl<Msg: LocalMessage> Mailbox<Msg> {
     #[allow(dead_code)]
     pub fn try_dequeue(&self) -> Result<Envelope<Msg>, QueueEmpty> {
         self.inner.queue.try_dequeue()
@@ -144,7 +144,7 @@ impl<Msg: Message> Mailbox<Msg> {
 
 impl<Msg> MailboxSchedule for Mailbox<Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn set_scheduled(&self, b: bool) {
         self.inner.scheduled.store(b, Ordering::Relaxed);
@@ -159,7 +159,7 @@ pub fn mailbox<Msg>(
     msg_process_limit: u32,
 ) -> (MailboxSender<Msg>, MailboxSender<SystemMsg>, Mailbox<Msg>)
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     let (qw, qr) = queue::<Msg>();
     let (sqw, sqr) = queue::<SystemMsg>();
@@ -342,7 +342,7 @@ fn handle_evt<A>(
     }
 }
 
-struct Sentinel<'a, Msg: Message> {
+struct Sentinel<'a, Msg: LocalMessage> {
     parent: BasicActorRef,
     actor: BasicActorRef,
     mbox: &'a Mailbox<Msg>,
@@ -350,7 +350,7 @@ struct Sentinel<'a, Msg: Message> {
 
 impl<Msg> Drop for Sentinel<'_, Msg>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn drop(&mut self) {
         if thread::panicking() {
@@ -373,7 +373,7 @@ where
 
 pub fn flush_to_deadletters<Msg>(mbox: &Mailbox<Msg>, actor: &BasicActorRef, sys: &ActorSystem)
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     while let Ok(Envelope { msg, sender }) = mbox.try_dequeue() {
         let dl = DeadLetter {

@@ -4,6 +4,7 @@ use picard_patterns::transformation::Receive;
 use picard_testkit::p_assert_eq;
 use picard_testkit::probe::channel::{ChannelProbe, probe};
 use picard_testkit::probe::{Probe, ProbeReceive};
+use serde::{Deserialize, Serialize};
 
 // NOTE:
 // Transform! will be updated in the near future,
@@ -19,13 +20,12 @@ enum ProbeMsg {
     Err,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum MyMsg {
     SetPassword(String),
     // password
     Authenticate(String),
     // password
-    Probe(TestProbe), // a probe will be used
 }
 
 #[allow(dead_code)]
@@ -35,16 +35,16 @@ struct UserActor {
     rec: Receive<Self, MyMsg>,
 
     // we need a probe for this test
-    probe: Option<TestProbe>,
+    probe: TestProbe,
 }
 
-impl ActorFactoryArgs<String> for UserActor {
-    fn create_args(username: String) -> Self {
+impl ActorFactoryArgs<(String, TestProbe)> for UserActor {
+    fn create_args((username, probe): (String, TestProbe)) -> Self {
         Self {
             username,
             password: None,
             rec: Self::created,
-            probe: None,
+            probe,
         }
     }
 }
@@ -67,11 +67,7 @@ impl UserActor {
                 // `MyMsg::Authenticate` is invalid since no user password
                 // has been set.
                 // Signal that this is an error for the current state
-                self.probe.as_ref().unwrap().0.event(ProbeMsg::Err);
-            }
-            MyMsg::Probe(probe) => {
-                // Just because this is a test and probe message is a varient
-                self.probe = Some(probe);
+                self.probe.0.event(ProbeMsg::Err);
             }
         }
     }
@@ -85,14 +81,11 @@ impl UserActor {
                 // e.g. `sender.try_tell(Ok, None);`
 
                 // signal that this is correct
-                self.probe.as_ref().unwrap().0.event(ProbeMsg::Ok);
+                self.probe.0.event(ProbeMsg::Ok);
             }
             MyMsg::SetPassword(passwd) => {
                 // set a new password
                 self.password = Some(passwd);
-            }
-            MyMsg::Probe(_) => {
-                // ignore probe
             }
         }
     }
@@ -111,13 +104,11 @@ impl Actor for UserActor {
 fn transform() {
     let sys = ActorSystem::new().unwrap();
 
-    let actor = sys
-        .actor_of_args::<UserActor, _>("trans", "user123".into())
-        .unwrap();
-
     // set up probe
     let (probe, listen) = probe();
-    actor.tell(MyMsg::Probe(TestProbe(probe)), None);
+    let actor = sys
+        .actor_of_args::<UserActor, _>("trans", ("user123".into(), TestProbe(probe)))
+        .unwrap();
 
     actor.tell(MyMsg::SetPassword("password123".into()), None);
     actor.tell(MyMsg::Authenticate("password123".into()), None);
@@ -129,13 +120,11 @@ fn transform() {
 fn transform_incorrect() {
     let sys = ActorSystem::new().unwrap();
 
-    let actor = sys
-        .actor_of_args::<UserActor, _>("trans", "user123".into())
-        .unwrap();
-
     // set up probe
     let (probe, listen) = probe();
-    actor.tell(MyMsg::Probe(TestProbe(probe)), None);
+    let actor = sys
+        .actor_of_args::<UserActor, _>("trans", ("user123".into(), TestProbe(probe)))
+        .unwrap();
 
     // in this version we'll try to authenticate the user
     // before a password as been set

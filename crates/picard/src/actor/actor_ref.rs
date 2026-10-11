@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::{
-    AnyMessage, Envelope, Message,
+    AnyMessage, Envelope, LocalMessage, Message,
     actor::{
         Actor, ActorPath, ActorUri, BoxActorProd, CreateError,
         actor_cell::{ActorCell, ExtendedCell},
@@ -69,8 +69,8 @@ pub trait Tell<T>: ActorReference + SystemTell + Send + 'static {
 
 impl<T, M> Tell<T> for ActorRef<M>
 where
-    T: Message + Into<M>,
-    M: Message,
+    T: LocalMessage + Into<M>,
+    M: LocalMessage,
 {
     fn tell(&self, msg: T, sender: Sender) {
         self.send_msg(msg.into(), sender);
@@ -83,7 +83,7 @@ where
 
 impl<T> ActorReference for BoxedTell<T>
 where
-    T: Message,
+    T: LocalMessage,
 {
     /// Actor name.
     ///
@@ -136,7 +136,7 @@ where
 
 impl<T> SystemTell for BoxedTell<T>
 where
-    T: Message,
+    T: LocalMessage,
 {
     fn send_system_message(&self, msg: SystemMsg) {
         (**self).send_system_message(msg);
@@ -194,7 +194,7 @@ impl BasicActorRef {
     }
 
     #[must_use]
-    pub fn typed<Msg: Message>(&self, cell: ExtendedCell<Msg>) -> ActorRef<Msg> {
+    pub fn typed<Msg: LocalMessage>(&self, cell: ExtendedCell<Msg>) -> ActorRef<Msg> {
         ActorRef { cell }
     }
 
@@ -216,7 +216,7 @@ impl BasicActorRef {
         sender: impl Into<Option<Self>>,
     ) -> Result<(), AnyEnqueueError>
     where
-        Msg: Message + Send,
+        Msg: LocalMessage + Send,
     {
         self.try_tell_any(&mut AnyMessage::new(msg), sender)
     }
@@ -370,7 +370,7 @@ impl PartialEq for BasicActorRef {
 
 impl<Msg> From<ActorRef<Msg>> for BasicActorRef
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn from(actor: ActorRef<Msg>) -> Self {
         Self::new(ActorCell::from(actor.cell))
@@ -379,7 +379,7 @@ where
 
 impl<Msg> From<ActorRef<Msg>> for Option<BasicActorRef>
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     fn from(actor: ActorRef<Msg>) -> Self {
         Some(BasicActorRef::new(ActorCell::from(actor.cell)))
@@ -406,11 +406,11 @@ pub type Sender = Option<BasicActorRef>;
 ///
 /// If an actor is restarted all existing references continue to
 /// be valid.
-pub struct ActorRef<Msg: Message> {
+pub struct ActorRef<Msg: LocalMessage> {
     pub(crate) cell: ExtendedCell<Msg>,
 }
 
-impl<Msg: Message> Clone for ActorRef<Msg> {
+impl<Msg: LocalMessage> Clone for ActorRef<Msg> {
     fn clone(&self) -> Self {
         Self {
             cell: self.cell.clone(),
@@ -418,7 +418,7 @@ impl<Msg: Message> Clone for ActorRef<Msg> {
     }
 }
 
-impl<Msg: Message> ActorRef<Msg> {
+impl<Msg: LocalMessage> ActorRef<Msg> {
     #[doc(hidden)]
     #[must_use]
     pub fn new(cell: ExtendedCell<Msg>) -> Self {
@@ -435,7 +435,7 @@ impl<Msg: Message> ActorRef<Msg> {
     }
 }
 
-impl<Msg: Message> ActorReference for ActorRef<Msg> {
+impl<Msg: LocalMessage> ActorReference for ActorRef<Msg> {
     /// Actor name.
     ///
     /// Unique among siblings.
@@ -485,14 +485,14 @@ impl<Msg: Message> ActorReference for ActorRef<Msg> {
     }
 }
 
-impl<Msg: Message> SystemTell for &ActorRef<Msg> {
+impl<Msg: LocalMessage> SystemTell for &ActorRef<Msg> {
     fn send_system_message(&self, msg: SystemMsg) {
         let envelope = Envelope { msg, sender: None };
         let _ = self.cell.send_sys_msg(envelope);
     }
 }
 
-impl<Msg: Message> ActorReference for &ActorRef<Msg> {
+impl<Msg: LocalMessage> ActorReference for &ActorRef<Msg> {
     /// Actor name.
     ///
     /// Unique among siblings.
@@ -542,26 +542,26 @@ impl<Msg: Message> ActorReference for &ActorRef<Msg> {
     }
 }
 
-impl<Msg: Message> SystemTell for ActorRef<Msg> {
+impl<Msg: LocalMessage> SystemTell for ActorRef<Msg> {
     fn send_system_message(&self, msg: SystemMsg) {
         let envelope = Envelope { msg, sender: None };
         let _ = self.cell.send_sys_msg(envelope);
     }
 }
 
-impl<Msg: Message> fmt::Debug for ActorRef<Msg> {
+impl<Msg: LocalMessage> fmt::Debug for ActorRef<Msg> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ActorRef[{:?}]", self.uri())
     }
 }
 
-impl<Msg: Message> fmt::Display for ActorRef<Msg> {
+impl<Msg: LocalMessage> fmt::Display for ActorRef<Msg> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ActorRef[{}]", self.uri())
     }
 }
 
-impl<Msg: Message> PartialEq for ActorRef<Msg> {
+impl<Msg: LocalMessage> PartialEq for ActorRef<Msg> {
     fn eq(&self, other: &Self) -> bool {
         self.uri().path == other.uri().path
     }
@@ -592,7 +592,8 @@ pub trait ActorRefFactory {
         props: BoxActorProd<A>,
     ) -> Result<ActorRef<A::Msg>, CreateError>
     where
-        A: Actor;
+        A: Actor,
+        <A as Actor>::Msg: Message;
 
     /// Create an actor using its [`ActorFactory`] implementation.
     ///
@@ -601,7 +602,8 @@ pub trait ActorRefFactory {
     /// See [`ActorRefFactory`].
     fn actor_of<A>(&self, name: &str) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
-        A: ActorFactory + Actor;
+        A: ActorFactory + Actor,
+        <A as Actor>::Msg: Message;
 
     /// Create an actor using its [`ActorFactoryArgs`] implementation.
     ///
@@ -615,7 +617,24 @@ pub trait ActorRefFactory {
     ) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
         Args: ActorArgs,
-        A: ActorFactoryArgs<Args>;
+        A: ActorFactoryArgs<Args>,
+        <A as Actor>::Msg: Message;
+
+    /// Create an actor without requiring its message type to implement
+    /// [`Message`]. Picard uses it for its own actors, such as channels,
+    /// whose messages hold actor references.
+    ///
+    /// # Errors
+    ///
+    /// See [`ActorRefFactory`].
+    #[doc(hidden)]
+    fn local_actor_of_props<A>(
+        &self,
+        name: &str,
+        props: BoxActorProd<A>,
+    ) -> Result<ActorRef<A::Msg>, CreateError>
+    where
+        A: Actor;
 
     fn stop(&self, actor: impl ActorReference);
 }
@@ -633,7 +652,8 @@ pub trait TmpActorRefFactory {
         props: BoxActorProd<A>,
     ) -> Result<ActorRef<A::Msg>, CreateError>
     where
-        A: Actor;
+        A: Actor,
+        <A as Actor>::Msg: Message;
 
     /// Create a temporary actor using its [`ActorFactory`] implementation.
     ///
@@ -642,7 +662,8 @@ pub trait TmpActorRefFactory {
     /// See [`TmpActorRefFactory::tmp_actor_of_props`].
     fn tmp_actor_of<A>(&self) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
-        A: ActorFactory + Actor;
+        A: ActorFactory + Actor,
+        <A as Actor>::Msg: Message;
 
     /// Create a temporary actor using its [`ActorFactoryArgs`] implementation.
     ///
@@ -655,5 +676,6 @@ pub trait TmpActorRefFactory {
     ) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
         Args: ActorArgs,
-        A: ActorFactoryArgs<Args>;
+        A: ActorFactoryArgs<Args>,
+        <A as Actor>::Msg: Message;
 }

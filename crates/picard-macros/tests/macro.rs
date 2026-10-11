@@ -97,7 +97,7 @@ fn run_derived_generic_actor() {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Message<T> {
     inner: T,
 }
@@ -151,12 +151,12 @@ fn run_generic_message_actor() {
 }
 
 mod test_mod {
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct GenericMessage<T> {
         pub inner: T,
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct Message;
 }
 
@@ -222,4 +222,13 @@ fn run_path_message_actor() {
         // in order to lower cpu usage, sleep here
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+fn assert_message<T: picard::Message>() {}
+
+#[test]
+fn generated_enums_are_messages() {
+    // With `picard/serde`, this also checks the derived `Serialize`/`Deserialize` impls.
+    assert_message::<GenericMsgActorMsg>();
+    assert_message::<PathMsgActorMsg>();
 }

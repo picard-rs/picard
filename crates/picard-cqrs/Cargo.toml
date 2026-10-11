@@ -19,3 +19,4 @@ log = { workspace = true, features = ["std"] }
     
 [dev-dependencies]
 picard-testkit.workspace = true
+serde.workspace = true

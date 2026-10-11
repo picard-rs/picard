@@ -27,7 +27,7 @@ pub use self::{
     uri::{ActorPath, ActorUri},
 };
 
-use crate::{Message, system::SystemMsg};
+use crate::{LocalMessage, system::SystemMsg};
 
 #[allow(unused)]
 pub type MsgResult<T> = Result<(), MsgError<T>>;
@@ -128,7 +128,7 @@ impl fmt::Debug for RestartError {
 }
 
 pub trait Actor: Send + 'static {
-    type Msg: Message;
+    type Msg: LocalMessage;
 
     /// Invoked when an actor is being started by the system.
     ///
@@ -212,8 +212,10 @@ impl<T: Actor + ?Sized> Actor for Box<T> {
 /// # use picard::actors::*;
 ///
 /// #[derive(Clone, Debug)]
+/// # #[derive(serde::Serialize, serde::Deserialize)]
 /// pub struct Foo;
 /// #[derive(Clone, Debug)]
+/// # #[derive(serde::Serialize, serde::Deserialize)]
 /// pub struct Bar;
 /// #[actor(Foo, Bar)] // <-- set our actor to receive Foo and Bar types
 /// #[derive(Default)]
@@ -259,8 +261,8 @@ impl<T: Actor + ?Sized> Actor for Box<T> {
 /// actor.tell(Foo, None);
 /// actor.tell(Bar, None);
 /// ```
-pub trait Receive<Msg: Message> {
-    type Msg: Message;
+pub trait Receive<Msg: LocalMessage> {
+    type Msg: LocalMessage;
 
     /// Invoked when an actor receives a message
     ///

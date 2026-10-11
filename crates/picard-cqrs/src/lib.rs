@@ -9,20 +9,22 @@ use picard::actors::{
     PicardConfig, Props, Sender, Tell, Timer,
 };
 
-/// Messages understood by the entity manager actor.
-#[derive(Clone, Debug)]
-pub enum EntityMsg<Msg: Message> {
-    /// Sends a command to the entity instance with the given id,
-    /// starting the instance if it is asleep.
-    Cmd(String, Msg),
-    Tick,
+picard::__actor_msg_enum! {
+    /// Messages understood by the entity manager actor.
+    #[derive(Clone, Debug)]
+    pub enum EntityMsg<Msg: Message> {
+        /// Sends a command to the entity instance with the given id,
+        /// starting the instance if it is asleep.
+        Cmd(String, Msg),
+        Tick,
+    }
 }
 
 /// Shorthand for the message type of the actor created by an `EntityActorProps`.
 pub type EntityActorMsg<Pro> = <<Pro as EntityActorProps>::Actor as Actor>::Msg;
 
 pub trait EntityActorProps: Clone + Send + Sync {
-    type Actor: Actor;
+    type Actor: Actor<Msg: Message>;
 
     fn props(&self, id: String) -> BoxActorProd<Self::Actor>;
 }
@@ -215,11 +217,12 @@ mod tests {
 
     use crate::{Entity, EntityActorProps, EntityMsg};
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub enum TestMsg {
         CreateAccountCmd(String),
         AddAmountCmd(i32),
-        Notify(std::sync::mpsc::Sender<()>),
+        /// Reports the account id on the notifier channel.
+        Notify,
     }
 
     #[derive(Clone, Debug)]
@@ -229,14 +232,21 @@ mod tests {
         balance: i32,
     }
 
+    type Notifier = Option<std::sync::mpsc::Sender<String>>;
+
     pub struct BankAccountActor {
         id: String,
         state: Option<BankAccount>,
+        notifier: Notifier,
     }
 
     impl BankAccountActor {
-        pub fn new(id: String) -> Self {
-            Self { id, state: None }
+        pub fn new((id, notifier): (String, Notifier)) -> Self {
+            Self {
+                id,
+                state: None,
+                notifier,
+            }
         }
     }
 
@@ -245,8 +255,10 @@ mod tests {
 
         fn recv(&mut self, _: &Context<TestMsg>, msg: TestMsg, _: Sender) {
             match (&mut self.state, msg) {
-                (_, TestMsg::Notify(tx)) => {
-                    let _ = tx.send(());
+                (_, TestMsg::Notify) => {
+                    if let Some(tx) = &self.notifier {
+                        let _ = tx.send(self.id.clone());
+                    }
                 }
                 (None, TestMsg::CreateAccountCmd(name)) => {
                     self.state = Some(BankAccount {
@@ -269,21 +281,29 @@ mod tests {
     }
 
     #[derive(Clone)]
-    pub struct BankAccountActorFact;
+    pub struct BankAccountActorFact(Notifier);
 
     impl EntityActorProps for BankAccountActorFact {
         type Actor = BankAccountActor;
 
         fn props(&self, id: String) -> BoxActorProd<Self::Actor> {
-            Props::new_from_args(BankAccountActor::new, id)
+            Props::new_from_args(BankAccountActor::new, (id, self.0.clone()))
         }
+    }
+
+    fn assert_message<T: Message>() {}
+
+    #[test]
+    fn entity_msg_is_a_message() {
+        // With `picard/serde`, this also checks the derived `Serialize`/`Deserialize` impls.
+        assert_message::<EntityMsg<TestMsg>>();
     }
 
     #[test]
     fn cqrs() {
         let system = ActorSystem::new().unwrap();
 
-        let em = Entity::new(&system, BankAccountActorFact, "BankAccount", None).unwrap();
+        let em = Entity::new(&system, BankAccountActorFact(None), "BankAccount", None).unwrap();
 
         let ids = ["12345678", "87654321", "65555555"];
         for id in &ids {
@@ -307,14 +327,18 @@ mod tests {
     #[test]
     fn entity_ids_with_path_characters_are_routed_safely() {
         let system = ActorSystem::new().unwrap();
-        let manager = Entity::new(&system, BankAccountActorFact, "EntityName", None).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
+        let manager =
+            Entity::new(&system, BankAccountActorFact(Some(tx)), "EntityName", None).unwrap();
 
         manager.tell(
-            EntityMsg::Cmd("account/with/slashes".into(), TestMsg::Notify(tx)),
+            EntityMsg::Cmd("account/with/slashes".into(), TestMsg::Notify),
             None,
         );
 
-        rx.recv_timeout(time::Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            rx.recv_timeout(time::Duration::from_secs(2)).unwrap(),
+            "account/with/slashes"
+        );
     }
 }

@@ -21,7 +21,7 @@ use futures::{StreamExt, channel::mpsc::unbounded, task::SpawnExt};
 use slog::warn;
 
 use crate::{
-    Message,
+    LocalMessage,
     actor::actor_cell::ExtendedCell,
     actor::actor_ref::SystemTell,
     actor::{
@@ -149,7 +149,7 @@ fn restart_actor<A>(
 
 fn terminate_actor<Msg>(mbox: &Mailbox<Msg>, actor_ref: BasicActorRef, sys: &ActorSystem)
 where
-    Msg: Message,
+    Msg: LocalMessage,
 {
     sys.provider.unregister(actor_ref.path());
     #[cfg(feature = "stats")]
