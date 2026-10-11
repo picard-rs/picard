@@ -129,20 +129,22 @@ impl fmt::Debug for SystemError {
 use std::{
     ops::Deref,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use chrono::prelude::*;
 use futures::{
     Future,
     channel::oneshot,
-    executor::{ThreadPool, ThreadPoolBuilder},
     future::RemoteHandle,
     task::{SpawnError, SpawnExt},
 };
 
 use uuid::Uuid;
 
+use crate::platform::Executor;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::platform::ThreadPoolBuilder;
 use crate::{
     AnyMessage, Message,
     actor::{
@@ -153,6 +155,7 @@ use crate::{
     },
     kernel::provider::{Provider, create_root},
     load_config,
+    platform::Instant,
     system::logger::{DeadLetterLogger, GlobalLoggerGuard, default_log},
     system::timer::{Job, OnceJob, RepeatJob, TimerRef},
     validate::{InvalidPath, validate_name},
@@ -177,7 +180,7 @@ pub struct SystemBuilder {
     name: Option<String>,
     cfg: Option<PicardConfig>,
     log: Option<Logger>,
-    exec: Option<ThreadPool>,
+    exec: Option<Executor>,
 }
 
 impl SystemBuilder {
@@ -219,7 +222,7 @@ impl SystemBuilder {
     }
 
     #[must_use]
-    pub fn exec(self, exec: ThreadPool) -> Self {
+    pub fn exec(self, exec: Executor) -> Self {
         Self {
             exec: Some(exec),
             ..self
@@ -273,7 +276,7 @@ pub struct ActorSystem {
     proto: Arc<ProtoSystem>,
     sys_actors: Option<SysActors>,
     log: LoggingSystem,
-    pub exec: ThreadPool,
+    pub exec: Executor,
     pub timer: TimerRef,
     pub sys_channels: Option<SysChannels>,
     pub(crate) provider: Provider,
@@ -315,7 +318,7 @@ impl ActorSystem {
 
     fn create(
         name: &str,
-        exec: ThreadPool,
+        exec: Executor,
         log: LoggingSystem,
         cfg: PicardConfig,
     ) -> Result<Self, SystemError> {
@@ -877,11 +880,13 @@ impl From<&PicardConfig> for SystemSettings {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct ThreadPoolConfig {
     pool_size: usize,
     stack_size: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&PicardConfig> for ThreadPoolConfig {
     fn from(config: &PicardConfig) -> Self {
         Self {
@@ -953,7 +958,14 @@ fn validate_config(cfg: &PicardConfig) -> Result<(), SystemError> {
     Ok(())
 }
 
-fn default_exec(cfg: &PicardConfig) -> Result<ThreadPool, SystemError> {
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::unnecessary_wraps)]
+fn default_exec(_cfg: &PicardConfig) -> Result<Executor, SystemError> {
+    Ok(Executor)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn default_exec(cfg: &PicardConfig) -> Result<Executor, SystemError> {
     let exec_cfg = ThreadPoolConfig::from(cfg);
     ThreadPoolBuilder::new()
         .pool_size(exec_cfg.pool_size)

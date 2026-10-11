@@ -9,6 +9,7 @@ mod validate;
 
 pub mod actor;
 pub mod kernel;
+pub mod platform;
 pub mod system;
 
 use std::any::Any;

@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex, MutexGuard, OnceLock, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use chrono::prelude::*;
@@ -25,6 +25,7 @@ use crate::{
         kernel_ref::{KernelRef, dispatch, dispatch_any},
         mailbox::{AnyEnqueueError, AnySender, MailboxSender},
     },
+    platform::Instant,
     system::{
         ActorSystem, Run, SystemCmd, SystemMsg,
         timer::{Job, OnceJob, RepeatJob, ScheduleId, Timer},
@@ -446,6 +447,16 @@ where
     /// Returns the `ActorRef` of the current actor.
     pub fn myself(&self) -> ActorRef<Msg> {
         self.myself.clone()
+    }
+
+    /// Reports this actor as failed to its parent, which applies its supervision strategy.
+    ///
+    /// This is what a panic does on targets with unwinding. Targets that abort on panic, such
+    /// as `wasm32-unknown-unknown`, can use it to get the same supervision without crashing.
+    pub fn fail(&self) {
+        let me: BasicActorRef = self.myself.clone().into();
+        me.parent()
+            .send_system_message(SystemMsg::Failed(me.clone()));
     }
 }
 

@@ -1,9 +1,12 @@
 use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap},
+    time::Duration,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use std::{
     sync::mpsc::{self, RecvTimeoutError},
     thread,
-    time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Utc};
@@ -12,9 +15,13 @@ use uuid::Uuid;
 use crate::{
     AnyMessage, Message,
     actor::{ActorRef, BasicActorRef, Sender},
+    platform::Instant,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub type TimerRef = mpsc::Sender<Job>;
+#[cfg(target_arch = "wasm32")]
+pub type TimerRef = WasmTimerRef;
 
 pub type ScheduleId = Uuid;
 
@@ -121,6 +128,7 @@ pub struct BasicTimer {
 }
 
 impl BasicTimer {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn start() -> TimerRef {
         let mut process = Self::default();
         let (tx, rx) = mpsc::channel();
@@ -151,6 +159,11 @@ impl BasicTimer {
         });
 
         tx
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn start() -> TimerRef {
+        WasmTimerRef::default()
     }
 
     fn handle(&mut self, job: Job) {
@@ -212,6 +225,51 @@ impl BasicTimer {
 
     pub fn schedule_repeat(&mut self, job: RepeatJob) {
         self.insert(Scheduled::Repeat(job));
+    }
+}
+
+/// Timer for targets without threads: a host timeout is armed for the earliest deadline.
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Default)]
+pub struct WasmTimerRef {
+    state: std::sync::Arc<std::sync::Mutex<WasmTimerState>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct WasmTimerState {
+    timer: BasicTimer,
+    armed: Option<Instant>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WasmTimerRef {
+    #[allow(clippy::unnecessary_wraps)]
+    pub fn send(&self, job: Job) -> Result<(), std::convert::Infallible> {
+        let mut state = self.state.lock().unwrap();
+        state.timer.handle(job);
+        Self::arm(&self.state, &mut state);
+        Ok(())
+    }
+
+    fn arm(shared: &std::sync::Arc<std::sync::Mutex<WasmTimerState>>, state: &mut WasmTimerState) {
+        let Some(deadline) = state.timer.next_deadline() else {
+            return;
+        };
+        if state.armed.is_some_and(|armed| armed <= deadline) {
+            return;
+        }
+        state.armed = Some(deadline);
+
+        let shared = shared.clone();
+        let wait = deadline.saturating_duration_since(Instant::now());
+        wasm_bindgen_futures::spawn_local(async move {
+            gloo_timers::future::sleep(wait).await;
+            let mut state = shared.lock().unwrap();
+            state.armed = None;
+            state.timer.run_due();
+            Self::arm(&shared, &mut state);
+        });
     }
 }
 

@@ -35,7 +35,8 @@ Other top-level items:
 
 - `lib.rs`: `AnyMessage`, `Envelope`, `load_config()`, and the `actors` prelude.
 - `system.rs`: `ActorSystem`, `SystemBuilder`, `SystemMsg`/`SystemEvent`, the typed config structs and `validate_config`.
-- `system/timer.rs`: `BasicTimer`, a deadline-heap timer thread that sleeps until the next job and exits when its sender is dropped.
+- `system/timer.rs`: `BasicTimer`, a deadline-heap timer thread that sleeps until the next job and exits when its sender is dropped. On wasm it is driven by host timeouts (`WasmTimerRef`).
+- `platform.rs`: per-target `Instant` and `Executor`. Native: `std::time::Instant` and the futures `ThreadPool`. `wasm32`: `web_time::Instant` and a single-threaded executor on the browser event loop. Use `picard::platform::Instant`, never `std::time::Instant`, in code that must run on wasm.
 - `system/logger.rs`: slog-based non-blocking logger.
 - `actor.rs`, `actor/`: `Actor` trait, `Props`, `ActorRef`/`BasicActorRef`, `ActorCell`, paths and URIs, channels, selection.
 - `kernel.rs`, `kernel/`: per-actor kernel task, `mailbox.rs` (user and system queues, scheduling flags), `queue.rs` (crossbeam channel), `provider.rs` (actor creation, path registry), `kernel_ref.rs`.
@@ -50,6 +51,7 @@ Other top-level items:
 - Each actor has a user queue and a system queue (lock-free crossbeam channels), a `Dock` that holds the actor behind `Arc<Mutex<Option<A>>>` (restart swaps the instance), and a kernel task fed by an unbounded futures channel.
 - Panics inside an actor are caught, the mailbox is suspended by `Sentinel`, and the parent receives `SystemMsg::Failed` to apply its supervision strategy.
 - The path registry is a `DashSet<ActorPath>`; creating an actor whose path exists returns `CreateError::AlreadyExists`.
+- `wasm32-unknown-unknown` aborts on panic, so there `Context::fail()` reports a failure to the parent without panicking. Picard needs `.cargo/config.toml` (getrandom `wasm_js` backend) to build for that target.
 - Core types (`ActorSystem`, `SystemMsg`, `KernelRef`, `MailboxSender`) are `Send + Sync` without `unsafe`; a test asserts this. Do not add `unsafe impl Send/Sync`.
 
 ## Commands
@@ -63,6 +65,7 @@ cargo bench -p picard --bench runtime                   # Criterion: message thr
 cargo bench -p picard --bench actor_suite               # Criterion: CAF-style benchmark suite
 cargo run -p living-city --release                      # Living City demo on http://127.0.0.1:8080
 cargo run -p living-city --release -- loadtest          # headless load test, prints a markdown table
+wasm-pack build demo --release --target web --out-dir web/pkg --no-default-features   # wasm demo, serve demo/web with ?worker
 ```
 
 Indicative Criterion measurements (one machine, not a controlled benchmark): `actor_creation` about 5 µs per actor, `actor_round_trip` about 8 µs, `typed_tell` about 33 ns.
