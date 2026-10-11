@@ -40,21 +40,21 @@ scaling and a traffic surge.
 
 ## Scenarios
 
-| Scenario                | UI                                       | What happens                                                                    |
-| ----------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
-| A Massive concurrency   | 100 / 1,000 / 5,000 / 10,000 buttons     | Vehicle actors are spawned in batches of 250 per district                       |
-| B Message passing       | Click a vehicle                          | Inspector shows live sent/received messages with sender, receiver and time      |
-| C Fault injection       | **Kill actor** / **Crash actor**         | See below                                                                       |
-| D Traffic surge         | **Surge in selected district**           | 800 vehicles head for that district's centre                                    |
-| E Dynamic lifecycle     | **Add / Remove selected** district       | A whole subtree is spawned or stopped; actor count and message rate follow      |
+| Scenario              | UI                                   | What happens                                                               |
+| --------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
+| A Massive concurrency | 100 / 1,000 / 5,000 / 10,000 buttons | Vehicle actors are spawned in batches of 250 per district                  |
+| B Message passing     | Click a vehicle                      | Inspector shows live sent/received messages with sender, receiver and time |
+| C Fault injection     | **Kill actor** / **Crash actor**     | See below                                                                  |
+| D Traffic surge       | **Surge in selected district**       | 800 vehicles head for that district's centre                               |
+| E Dynamic lifecycle   | **Add / Remove selected** district   | A whole subtree is spawned or stopped; actor count and message rate follow |
 
 ### Failure semantics (what Picard really does)
 
-| Target     | Kill (actor stops itself)                                                                  | Crash (panic, parent's strategy `Restart`)                       |
-| ---------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| Vehicle    | Gone. The district removes it on the termination event. Others unaffected.                 | Restarted by its district with the same id at its spawn node.    |
-| Light      | Junction notices missing heartbeats after 3 s, runs a fixed-time fallback, respawns it in 8 s. | Restarted by the junction.                                       |
-| Junction   | Not restarted. Vehicles time out, block the node and reroute around it.                    | Restarted by its district; queues are lost and retries rebuild them. |
+| Target   | Kill (actor stops itself)                                                                      | Crash (panic, parent's strategy `Restart`)                           |
+| -------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Vehicle  | Gone. The district removes it on the termination event. Others unaffected.                     | Restarted by its district with the same id at its spawn node.        |
+| Light    | Junction notices missing heartbeats after 3 s, runs a fixed-time fallback, respawns it in 8 s. | Restarted by the junction.                                           |
+| Junction | Not restarted. Vehicles time out, block the node and reroute around it.                        | Restarted by its district; queues are lost and retries rebuild them. |
 
 Removing a district stops all of its descendants through Picard's hierarchical stop.
 
