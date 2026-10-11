@@ -2,29 +2,30 @@ use std::{
     fmt,
     ops::Deref,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 
 use chrono::prelude::*;
 use dashmap::DashMap;
-use futures::{future::RemoteHandle, task::SpawnError, Future};
+use futures::{Future, future::RemoteHandle, task::SpawnError};
 use uuid::Uuid;
 
 use crate::{
+    AnyMessage, Envelope, Message,
+    actor::actor_ref::SystemTell,
     actor::{props::ActorFactory, *},
     kernel::{
-        kernel_ref::{dispatch, dispatch_any, KernelRef},
+        kernel_ref::{KernelRef, dispatch, dispatch_any},
         mailbox::{AnyEnqueueError, AnySender, MailboxSender},
     },
     system::{
-        timer::{Job, OnceJob, RepeatJob, ScheduleId, Timer},
         ActorSystem, Run, SystemCmd, SystemMsg,
+        timer::{Job, OnceJob, RepeatJob, ScheduleId, Timer},
     },
     validate::InvalidPath,
-    AnyMessage, Envelope, Message,
 };
 
 #[derive(Clone)]
@@ -139,7 +140,7 @@ impl ActorCell {
     }
 
     pub(crate) fn stop(&self, actor: &BasicActorRef) {
-        actor.sys_tell(SystemCmd::Stop.into());
+        actor.send_system_message(SystemCmd::Stop.into());
     }
 
     pub fn add_child(&self, actor: BasicActorRef) {
@@ -214,7 +215,7 @@ impl ActorCell {
     }
 
     pub fn restart_child(&self, actor: &BasicActorRef) {
-        actor.sys_tell(SystemCmd::Restart.into());
+        actor.send_system_message(SystemCmd::Restart.into());
     }
 
     pub fn escalate_failure(&self) {
@@ -222,7 +223,7 @@ impl ActorCell {
             .parent
             .as_ref()
             .unwrap()
-            .sys_tell(SystemMsg::Failed(self.myself()));
+            .send_system_message(SystemMsg::Failed(self.myself()));
     }
 }
 
@@ -280,10 +281,18 @@ impl TmpActorRefFactory for ActorCell {
     }
 }
 
-#[derive(Clone)]
 pub struct ExtendedCell<Msg: Message> {
     cell: ActorCell,
     mailbox: MailboxSender<Msg>,
+}
+
+impl<Msg: Message> Clone for ExtendedCell<Msg> {
+    fn clone(&self) -> Self {
+        Self {
+            cell: self.cell.clone(),
+            mailbox: self.mailbox.clone(),
+        }
+    }
 }
 
 impl<Msg> ExtendedCell<Msg>
@@ -362,10 +371,9 @@ where
         let k = self.cell.kernel();
 
         dispatch(msg, mb, k, self.system()).inspect_err(|e| {
-            let dl = e.clone(); // clone the failed message and send to dead letters
             let dl = DeadLetter {
-                msg: format!("{:?}", dl.msg.msg),
-                sender: dl.msg.sender,
+                msg: format!("{:?}", e.msg.msg),
+                sender: e.msg.sender.clone(),
                 recipient: self.cell.myself(),
             };
 
@@ -487,7 +495,7 @@ impl<Msg: Message> ActorRefFactory for Context<Msg> {
     }
 
     fn stop(&self, actor: impl ActorReference) {
-        actor.sys_tell(SystemCmd::Stop.into());
+        actor.stop();
     }
 }
 
@@ -540,7 +548,7 @@ where
     ) -> ScheduleId
     where
         T: Message + Into<M>,
-        M: Message,
+        M: Message + Clone,
     {
         let id = Uuid::new_v4();
         let msg: M = msg.into();
@@ -551,7 +559,7 @@ where
             interval,
             receiver: receiver.into(),
             sender,
-            msg: AnyMessage::new(msg, false),
+            msg: AnyMessage::new_repeatable(msg),
         };
 
         self.system.timer.send(Job::Repeat(job)).unwrap();
@@ -577,7 +585,7 @@ where
             send_at: Instant::now() + delay,
             receiver: receiver.into(),
             sender,
-            msg: AnyMessage::new(msg, true),
+            msg: AnyMessage::new(msg),
         };
 
         self.system.timer.send(Job::Once(job)).unwrap();
@@ -605,7 +613,7 @@ where
             send_at: Instant::now() + delay,
             receiver: receiver.into(),
             sender,
-            msg: AnyMessage::new(msg, true),
+            msg: AnyMessage::new(msg),
         };
 
         self.system.timer.send(Job::Once(job)).unwrap();

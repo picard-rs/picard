@@ -3,12 +3,13 @@
 use std::{collections::HashMap, hash::Hash};
 
 use crate::{
+    Message,
+    actor::actor_ref::SystemTell,
     actor::{
         Actor, ActorRef, ActorRefFactory, ActorReference, BasicActorRef, BoxedTell, Context,
         CreateError, Receive, Sender,
     },
     system::{SystemEvent, SystemMsg},
-    Message,
 };
 
 type Subs<Msg> = HashMap<Topic, Vec<BoxedTell<Msg>>>;
@@ -32,7 +33,7 @@ impl<Msg: Message> Default for Channel<Msg> {
 
 impl<Msg> Actor for Channel<Msg>
 where
-    Msg: Message,
+    Msg: Message + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -56,19 +57,20 @@ where
     // terminated but did not explicity unsubscribe before terminating.
     fn sys_recv(&mut self, _: &ChannelCtx<Msg>, msg: SystemMsg, sender: Sender) {
         if let SystemMsg::Event(evt) = msg
-            && let SystemEvent::ActorTerminated(terminated) = evt {
-                let subs = self.subs.clone();
+            && let SystemEvent::ActorTerminated(terminated) = evt
+        {
+            let subs = self.subs.clone();
 
-                for topic in subs.keys() {
-                    unsubscribe(&mut self.subs, topic, &terminated.actor);
-                }
+            for topic in subs.keys() {
+                unsubscribe(&mut self.subs, topic, &terminated.actor);
             }
+        }
     }
 }
 
 impl<Msg> Receive<ChannelMsg<Msg>> for Channel<Msg>
 where
-    Msg: Message,
+    Msg: Message + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -84,7 +86,7 @@ where
 
 impl<Msg> Receive<Subscribe<Msg>> for Channel<Msg>
 where
-    Msg: Message,
+    Msg: Message + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -122,7 +124,7 @@ where
 
 impl<Msg> Receive<Publish<Msg>> for Channel<Msg>
 where
-    Msg: Message,
+    Msg: Message + Clone,
 {
     type Msg = ChannelMsg<Msg>;
 
@@ -151,9 +153,9 @@ fn unsubscribe<Msg>(subs: &mut Subs<Msg>, topic: &Topic, actor: &dyn ActorRefere
             .unwrap()
             .iter()
             .position(|x| x.path() == actor.path())
-        {
-            subs.get_mut(topic).unwrap().remove(pos);
-        }
+    {
+        subs.get_mut(topic).unwrap().remove(pos);
+    }
 }
 
 /// A specialized channel that publishes messages as system messages
@@ -209,7 +211,7 @@ impl Receive<Publish<SystemEvent>> for EventsChannel {
         if let Some(subs) = self.0.subs.get(&All.into()) {
             for sub in subs.iter() {
                 let evt = SystemMsg::Event(msg.msg.clone());
-                sub.sys_tell(evt);
+                sub.send_system_message(evt);
             }
         }
 
@@ -217,7 +219,7 @@ impl Receive<Publish<SystemEvent>> for EventsChannel {
         if let Some(subs) = self.0.subs.get(&msg.topic) {
             for sub in subs.iter() {
                 let evt = SystemMsg::Event(msg.msg.clone());
-                sub.sys_tell(evt);
+                sub.send_system_message(evt);
             }
         }
     }
@@ -355,7 +357,7 @@ impl From<SysTopic> for Topic {
 
 pub fn channel<Msg>(name: &str, fact: &impl ActorRefFactory) -> Result<ChannelRef<Msg>, CreateError>
 where
-    Msg: Message,
+    Msg: Message + Clone,
 {
     fact.actor_of::<Channel<Msg>>(name)
 }

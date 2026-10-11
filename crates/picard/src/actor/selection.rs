@@ -1,11 +1,9 @@
-use std::iter::Peekable;
-
 use crate::{
-    actor::{ActorReference, BasicActorRef, Sender},
-    system::SystemMsg,
-    validate::{validate_path, InvalidPath},
     Message,
+    actor::{ActorReference, BasicActorRef},
+    validate::{InvalidPath, validate_path},
 };
+use std::collections::HashSet;
 
 /// A selection represents part of the actor heirarchy, allowing
 /// messages to be sent to all actors in the selection.
@@ -27,10 +25,11 @@ use crate::{
 /// A selection is anchored to an `ActorRef` and the path is relative
 /// to that actor's path.
 ///
-/// `selection.try_tell()` is used to message actors in the selection.
-/// Since a selection is a collection of `BasicActorRef`s messaging is
-/// un-typed. Messages not supported by any actor in the selection will
-/// be dropped.
+/// Sending to a selection is untyped and requires cloneable messages for
+/// fan-out. Each actor is sent the message at most once, even if traversal
+/// reaches it through multiple branches. [`ActorSelection::try_tell`] reports
+/// how many recipient mailboxes accepted the message and returns an error
+/// when there are no recipients or delivery failed for one or more recipients.
 #[derive(Debug)]
 pub struct ActorSelection {
     anchor: BasicActorRef,
@@ -64,121 +63,92 @@ impl ActorSelection {
         })
     }
 
-    pub fn try_tell<Msg>(&self, msg: Msg, sender: impl Into<Option<BasicActorRef>>)
+    pub fn try_tell<Msg>(
+        &self,
+        msg: Msg,
+        sender: impl Into<Option<BasicActorRef>>,
+    ) -> Result<usize, SelectionSendError>
     where
-        Msg: Message,
+        Msg: Message + Clone,
     {
-        fn walk<'a, I, Msg>(
+        fn walk(
             anchor: &BasicActorRef,
-            // dl: &BasicActorRef,
-            mut path_vec: Peekable<I>,
-            msg: Msg,
-            sender: &Sender,
-        ) where
-            I: Iterator<Item = &'a Selection>,
-            Msg: Message,
-        {
-            let seg = path_vec.next();
+            path: &[Selection],
+            targets: &mut Vec<BasicActorRef>,
+            seen: &mut HashSet<crate::actor::ActorPath>,
+        ) {
+            let Some((segment, remaining)) = path.split_first() else {
+                if seen.insert(anchor.path().clone()) {
+                    targets.push(anchor.clone());
+                }
+                return;
+            };
 
-            match seg {
-                Some(&Selection::Parent) => {
-                    if path_vec.peek().is_none() {
-                        let parent = anchor.parent();
-                        let _ = parent.try_tell(msg, sender.clone());
-                    } else {
-                        walk(&anchor.parent(), path_vec, msg, sender);
-                    }
-                }
-                Some(&Selection::AllChildren) => {
+            match segment {
+                Selection::Parent => walk(&anchor.parent(), remaining, targets, seen),
+                Selection::AllChildren => {
                     for child in anchor.children() {
-                        let _ = child.try_tell(msg.clone(), sender.clone());
+                        walk(&child, remaining, targets, seen);
                     }
                 }
-                Some(Selection::ChildName(name)) => {
-                    let child = anchor.children().filter(|c| c.name() == name).last();
-                    if path_vec.peek().is_none() {
-                        if let Some(actor_ref) = child {
-                            let _ = actor_ref.try_tell(msg, sender.clone());
-                        }
-                    } else if path_vec.peek().is_some() && child.is_some() {
-                        walk(
-                            child.as_ref().unwrap(),
-                            // dl,
-                            path_vec,
-                            msg,
-                            sender,
-                        );
-                    } else {
-                        // todo send to deadletters?
+                Selection::ChildName(name) => {
+                    if let Some(child) = anchor.children().find(|child| child.name() == name) {
+                        walk(&child, remaining, targets, seen);
                     }
                 }
-                None => {}
             }
         }
 
+        let mut targets = Vec::new();
         walk(
             &self.anchor,
-            // &self.dl,
-            self.path_vec.iter().peekable(),
-            msg,
-            &sender.into(),
+            &self.path_vec,
+            &mut targets,
+            &mut HashSet::new(),
         );
-    }
-
-    pub fn sys_tell(&self, msg: SystemMsg, _sender: impl Into<Option<BasicActorRef>>) {
-        fn walk<'a, I>(
-            anchor: &BasicActorRef,
-            // dl: &BasicActorRef,
-            mut path_vec: Peekable<I>,
-            msg: SystemMsg,
-        ) where
-            I: Iterator<Item = &'a Selection>,
-        {
-            let seg = path_vec.next();
-
-            match seg {
-                Some(&Selection::Parent) => {
-                    if path_vec.peek().is_none() {
-                        let parent = anchor.parent();
-                        parent.sys_tell(msg);
-                    } else {
-                        walk(&anchor.parent(), path_vec, msg);
-                    }
-                }
-                Some(&Selection::AllChildren) => {
-                    for child in anchor.children() {
-                        child.sys_tell(msg.clone());
-                    }
-                }
-                Some(Selection::ChildName(name)) => {
-                    let child = anchor.children().filter(|c| c.name() == name).last();
-                    if path_vec.peek().is_none() {
-                        if let Some(actor_ref) = child {
-                            actor_ref.sys_tell(msg);
-                        }
-                    } else if path_vec.peek().is_some() && child.is_some() {
-                        walk(
-                            child.as_ref().unwrap(),
-                            // dl,
-                            path_vec,
-                            msg,
-                        );
-                    } else {
-                        // todo send to deadletters?
-                    }
-                }
-                None => {}
-            }
+        if targets.is_empty() {
+            return Err(SelectionSendError::NoRecipients);
         }
 
-        walk(
-            &self.anchor,
-            // &self.dl,
-            self.path_vec.iter().peekable(),
-            msg,
-        );
+        let sender = sender.into();
+        let mut delivered = 0;
+        let mut failed = 0;
+        for target in targets {
+            if target.try_tell(msg.clone(), sender.clone()).is_ok() {
+                delivered += 1;
+            } else {
+                failed += 1;
+            }
+        }
+        if failed == 0 {
+            Ok(delivered)
+        } else {
+            Err(SelectionSendError::DeliveryFailed { delivered, failed })
+        }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionSendError {
+    /// The path did not resolve to any actors.
+    NoRecipients,
+    /// One or more recipients rejected delivery; counts include all outcomes.
+    DeliveryFailed { delivered: usize, failed: usize },
+}
+
+impl std::fmt::Display for SelectionSendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoRecipients => f.write_str("actor selection matched no recipients"),
+            Self::DeliveryFailed { delivered, failed } => write!(
+                f,
+                "actor selection delivered to {delivered} recipients and failed for {failed}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SelectionSendError {}
 
 #[derive(Debug)]
 enum Selection {

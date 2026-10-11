@@ -1,14 +1,14 @@
 use std::fmt;
 
 use crate::{
+    AnyMessage, Envelope, Message,
     actor::{
+        Actor, ActorPath, ActorUri, BoxActorProd, CreateError,
         actor_cell::{ActorCell, ExtendedCell},
         props::{ActorArgs, ActorFactory, ActorFactoryArgs},
-        Actor, ActorPath, ActorUri, BoxActorProd, CreateError,
     },
     kernel::mailbox::AnyEnqueueError,
-    system::{ActorSystem, SystemMsg},
-    AnyMessage, Envelope, Message,
+    system::{ActorSystem, SystemCmd, SystemMsg},
 };
 
 pub trait ActorReference {
@@ -51,13 +51,18 @@ pub trait ActorReference {
     /// Iterator over children references.
     fn children<'a>(&'a self) -> Box<dyn Iterator<Item = BasicActorRef> + 'a>;
 
-    /// Send a system message to this actor
-    fn sys_tell(&self, msg: SystemMsg);
+    /// Stop this actor and its children.
+    fn stop(&self);
+}
+
+pub(crate) trait SystemTell {
+    fn send_system_message(&self, msg: SystemMsg);
 }
 
 pub type BoxedTell<T> = Box<dyn Tell<T> + Send + 'static>;
 
-pub trait Tell<T>: ActorReference + Send + 'static {
+#[allow(private_bounds)]
+pub trait Tell<T>: ActorReference + SystemTell + Send + 'static {
     fn tell(&self, msg: T, sender: Sender);
     fn box_clone(&self) -> BoxedTell<T>;
 }
@@ -124,8 +129,17 @@ where
         (**self).children()
     }
 
-    fn sys_tell(&self, msg: SystemMsg) {
-        (**self).sys_tell(msg)
+    fn stop(&self) {
+        (**self).stop()
+    }
+}
+
+impl<T> SystemTell for BoxedTell<T>
+where
+    T: Message,
+{
+    fn send_system_message(&self, msg: SystemMsg) {
+        (**self).send_system_message(msg)
     }
 }
 
@@ -169,7 +183,7 @@ impl<T: 'static> Clone for BoxedTell<T> {
 /// In general, it is better to use `ActorRef` where possible.
 #[derive(Clone)]
 pub struct BasicActorRef {
-    pub cell: ActorCell,
+    pub(crate) cell: ActorCell,
 }
 
 impl BasicActorRef {
@@ -197,7 +211,7 @@ impl BasicActorRef {
     where
         Msg: Message + Send,
     {
-        self.try_tell_any(&mut AnyMessage::new(msg, true), sender)
+        self.try_tell_any(&mut AnyMessage::new(msg), sender)
     }
 
     pub fn try_tell_any(
@@ -254,7 +268,13 @@ impl ActorReference for BasicActorRef {
         self.cell.children()
     }
 
-    fn sys_tell(&self, msg: SystemMsg) {
+    fn stop(&self) {
+        self.send_system_message(SystemCmd::Stop.into());
+    }
+}
+
+impl SystemTell for BasicActorRef {
+    fn send_system_message(&self, msg: SystemMsg) {
         let envelope = Envelope { msg, sender: None };
         let _ = self.cell.send_sys_msg(envelope);
     }
@@ -305,7 +325,13 @@ impl ActorReference for &BasicActorRef {
         self.cell.children()
     }
 
-    fn sys_tell(&self, msg: SystemMsg) {
+    fn stop(&self) {
+        self.send_system_message(SystemCmd::Stop.into());
+    }
+}
+
+impl SystemTell for &BasicActorRef {
+    fn send_system_message(&self, msg: SystemMsg) {
         let envelope = Envelope { msg, sender: None };
         let _ = self.cell.send_sys_msg(envelope);
     }
@@ -367,9 +393,16 @@ pub type Sender = Option<BasicActorRef>;
 ///
 /// If an actor is restarted all existing references continue to
 /// be valid.
-#[derive(Clone)]
 pub struct ActorRef<Msg: Message> {
-    pub cell: ExtendedCell<Msg>,
+    pub(crate) cell: ExtendedCell<Msg>,
+}
+
+impl<Msg: Message> Clone for ActorRef<Msg> {
+    fn clone(&self) -> Self {
+        Self {
+            cell: self.cell.clone(),
+        }
+    }
 }
 
 impl<Msg: Message> ActorRef<Msg> {
@@ -433,7 +466,13 @@ impl<Msg: Message> ActorReference for ActorRef<Msg> {
         self.cell.children()
     }
 
-    fn sys_tell(&self, msg: SystemMsg) {
+    fn stop(&self) {
+        self.send_system_message(SystemCmd::Stop.into());
+    }
+}
+
+impl<Msg: Message> SystemTell for &ActorRef<Msg> {
+    fn send_system_message(&self, msg: SystemMsg) {
         let envelope = Envelope { msg, sender: None };
         let _ = self.cell.send_sys_msg(envelope);
     }
@@ -484,7 +523,13 @@ impl<Msg: Message> ActorReference for &ActorRef<Msg> {
         self.cell.children()
     }
 
-    fn sys_tell(&self, msg: SystemMsg) {
+    fn stop(&self) {
+        self.send_system_message(SystemCmd::Stop.into());
+    }
+}
+
+impl<Msg: Message> SystemTell for ActorRef<Msg> {
+    fn send_system_message(&self, msg: SystemMsg) {
         let envelope = Envelope { msg, sender: None };
         let _ = self.cell.send_sys_msg(envelope);
     }
@@ -508,12 +553,12 @@ impl<Msg: Message> PartialEq for ActorRef<Msg> {
     }
 }
 
-/// Produces `ActorRef`s. `actor_of` blocks on the current thread until
-/// the actor has successfully started or failed to start.
+/// Produces `ActorRef`s. Actor creation runs the actor factory synchronously,
+/// then returns the reference after scheduling the actor's initialization.
 ///
-/// It is advised to return from the actor's factory method quickly and
-/// handle any initialization in the actor's `pre_start` method, which is
-/// invoked after the `ActorRef` is returned.
+/// `pre_start` and `post_start` may not have run when this method returns.
+/// Failures in those hooks are handled by the actor runtime and are not
+/// reported as errors from actor creation.
 pub trait ActorRefFactory {
     fn actor_of_props<A>(
         &self,

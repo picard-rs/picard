@@ -4,7 +4,7 @@ use crate::actor::{
 };
 use crate::system::LoggingSystem;
 use config::Config;
-use slog::{info, o, Drain, Level, Logger, Never, OwnedKVList, Record};
+use slog::{Drain, Level, Logger, Never, OwnedKVList, Record, info, o};
 use std::str::FromStr;
 use std::sync::Arc;
 

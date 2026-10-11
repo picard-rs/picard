@@ -14,22 +14,23 @@ pub enum KernelMsg {
     Sys(ActorSystem),
 }
 use std::{
-    panic::{catch_unwind, AssertUnwindSafe},
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::{Arc, Mutex},
 };
 
-use futures::{channel::mpsc::channel, task::SpawnExt, StreamExt};
+use futures::{StreamExt, channel::mpsc::channel, task::SpawnExt};
 use slog::warn;
 
 use crate::{
+    Message,
     actor::actor_cell::ExtendedCell,
+    actor::actor_ref::SystemTell,
     actor::*,
     kernel::{
         kernel_ref::KernelRef,
-        mailbox::{flush_to_deadletters, run_mailbox, Mailbox},
+        mailbox::{Mailbox, flush_to_deadletters, run_mailbox},
     },
     system::{ActorRestarted, ActorTerminated, SystemMsg},
-    Message,
 };
 
 pub struct Dock<A: Actor> {
@@ -114,7 +115,7 @@ fn restart_actor<A>(
     match start_actor(props) {
         Ok(actor) => {
             *a = Some(actor);
-            actor_ref.sys_tell(SystemMsg::ActorInit);
+            actor_ref.send_system_message(SystemMsg::ActorInit);
             sys.publish_event(ActorRestarted { actor: actor_ref }.into());
         }
         Err(_) => {
@@ -138,7 +139,7 @@ where
 
     let parent = actor_ref.parent();
     if !parent.is_root() {
-        parent.sys_tell(ActorTerminated { actor: actor_ref }.into());
+        parent.send_system_message(ActorTerminated { actor: actor_ref }.into());
     }
 }
 

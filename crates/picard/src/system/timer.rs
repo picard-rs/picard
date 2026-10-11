@@ -9,8 +9,8 @@ use config::Config;
 use uuid::Uuid;
 
 use crate::{
-    actor::{ActorRef, BasicActorRef, Sender},
     AnyMessage, Message,
+    actor::{ActorRef, BasicActorRef, Sender},
 };
 
 pub type TimerRef = mpsc::Sender<Job>;
@@ -28,7 +28,7 @@ pub trait Timer {
     ) -> ScheduleId
     where
         T: Message + Into<M>,
-        M: Message;
+        M: Message + Clone;
 
     fn schedule_once<T, M>(
         &self,
@@ -109,19 +109,21 @@ impl BasicTimer {
         };
 
         let (tx, rx) = mpsc::channel();
-        thread::spawn(move || loop {
-            process.execute_once_jobs();
-            process.execute_repeat_jobs();
+        thread::spawn(move || {
+            loop {
+                process.execute_once_jobs();
+                process.execute_repeat_jobs();
 
-            if let Ok(job) = rx.try_recv() {
-                match job {
-                    Job::Cancel(id) => process.cancel(&id),
-                    Job::Once(job) => process.schedule_once(job),
-                    Job::Repeat(job) => process.schedule_repeat(job),
+                if let Ok(job) = rx.try_recv() {
+                    match job {
+                        Job::Cancel(id) => process.cancel(&id),
+                        Job::Once(job) => process.schedule_once(job),
+                        Job::Repeat(job) => process.schedule_repeat(job),
+                    }
                 }
-            }
 
-            thread::sleep(Duration::from_millis(cfg.frequency_millis));
+                thread::sleep(Duration::from_millis(cfg.frequency_millis));
+            }
         });
 
         tx
@@ -198,8 +200,8 @@ impl From<&Config> for BasicTimerConfig {
 #[cfg(test)]
 mod tests {
     use super::{BasicTimer, RepeatJob};
-    use crate::actors::*;
     use crate::AnyMessage;
+    use crate::actors::*;
     use std::{
         sync::mpsc::{self, Sender as ChannelSender},
         time::{Duration, Instant},
@@ -239,7 +241,7 @@ mod tests {
             interval: Duration::from_secs(30),
             receiver: actor.into(),
             sender: None,
-            msg: AnyMessage::new((), false),
+            msg: AnyMessage::new_repeatable(()),
         });
 
         rx.recv_timeout(Duration::from_secs(1)).unwrap();

@@ -22,7 +22,7 @@ pub mod channel {
     use super::{Probe, ProbeReceive};
 
     use std::{
-        sync::mpsc::{channel, Receiver, Sender},
+        sync::mpsc::{Receiver, Sender, channel},
         time::Instant,
     };
 

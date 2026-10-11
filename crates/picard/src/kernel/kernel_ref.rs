@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use futures::{channel::mpsc::Sender, task::SpawnExt, SinkExt};
+use futures::{SinkExt, channel::mpsc::Sender, task::SpawnExt};
 
 use crate::{
+    AnyMessage, Envelope, Message,
     actor::{MsgError, MsgResult},
     kernel::{
-        mailbox::{AnyEnqueueError, AnySender, MailboxSchedule, MailboxSender},
         KernelMsg,
+        mailbox::{AnyEnqueueError, AnySender, MailboxSchedule, MailboxSender},
     },
     system::ActorSystem,
-    AnyMessage, Envelope, Message,
 };
 
 #[derive(Clone)]

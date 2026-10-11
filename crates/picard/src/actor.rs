@@ -19,16 +19,16 @@ pub use self::{
         TmpActorRefFactory,
     },
     channel::{
-        channel, All, Channel, ChannelMsg, ChannelRef, DLChannelMsg, DeadLetter, EventsChannel,
-        Publish, Subscribe, SysTopic, Topic, Unsubscribe, UnsubscribeAll,
+        All, Channel, ChannelMsg, ChannelRef, DLChannelMsg, DeadLetter, EventsChannel, Publish,
+        Subscribe, SysTopic, Topic, Unsubscribe, UnsubscribeAll, channel,
     },
     macros::actor,
     props::{ActorArgs, ActorFactory, ActorFactoryArgs, ActorProducer, BoxActorProd, Props},
-    selection::{ActorSelection, ActorSelectionFactory},
+    selection::{ActorSelection, ActorSelectionFactory, SelectionSendError},
     uri::{ActorPath, ActorUri},
 };
 
-use crate::{system::SystemMsg, Message};
+use crate::{Message, system::SystemMsg};
 
 #[allow(unused)]
 pub type MsgResult<T> = Result<(), MsgError<T>>;

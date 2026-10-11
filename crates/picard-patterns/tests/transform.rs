@@ -5,7 +5,7 @@ extern crate picard_testkit;
 
 use picard::actors::*;
 use picard_patterns::transform::Receive;
-use picard_testkit::probe::channel::{probe, ChannelProbe};
+use picard_testkit::probe::channel::{ChannelProbe, probe};
 use picard_testkit::probe::{Probe, ProbeReceive};
 
 // NOTE:

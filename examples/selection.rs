@@ -37,31 +37,31 @@ impl Actor for SelectTest {
         let path = "../select-actor/child_a";
         println!("{}: {:?} -> path: {}", ctx.myself.name(), self, path);
         let sel = ctx.select(path).unwrap();
-        sel.try_tell(path.to_string(), None);
+        sel.try_tell(path.to_string(), None).unwrap();
 
         // child: child_a
         let path = "child_a";
         println!("{}: {:?} -> path: {}", ctx.myself.name(), self, path);
         let sel = ctx.select(path).unwrap();
-        sel.try_tell(path.to_string(), None);
+        sel.try_tell(path.to_string(), None).unwrap();
 
         // absolute: /user/select-actor/child_a
         let path = "/user/select-actor/child_a";
         println!("{}: {:?} -> path: {}", ctx.myself.name(), self, path);
         let sel = ctx.select(path).unwrap();
-        sel.try_tell(path.to_string(), None);
+        sel.try_tell(path.to_string(), None).unwrap();
 
         // absolute all: /user/select-actor/*
         let path = "/user/select-actor/*";
         println!("{}: {:?} -> path: {}", ctx.myself.name(), self, path);
         let sel = ctx.select(path).unwrap();
-        sel.try_tell(path.to_string(), None);
+        sel.try_tell(path.to_string(), None).unwrap();
 
         // all: *
         let path = "*";
         println!("{}: {:?} -> path: {}", ctx.myself.name(), self, path);
         let sel = ctx.select(path).unwrap();
-        sel.try_tell(path.to_string(), None);
+        sel.try_tell(path.to_string(), None).unwrap();
     }
 }
 

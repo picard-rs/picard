@@ -1,6 +1,6 @@
 use std::sync::{
-    mpsc::{channel, Receiver, Sender},
     Mutex,
+    mpsc::{Receiver, Sender, channel},
 };
 
 use crate::{Envelope, Message};
@@ -22,9 +22,16 @@ pub fn queue<Msg: Message>() -> (QueueWriter<Msg>, QueueReader<Msg>) {
     (qw, qr)
 }
 
-#[derive(Clone)]
 pub struct QueueWriter<Msg: Message> {
     tx: Sender<Envelope<Msg>>,
+}
+
+impl<Msg: Message> Clone for QueueWriter<Msg> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+        }
+    }
 }
 
 impl<Msg: Message> QueueWriter<Msg> {

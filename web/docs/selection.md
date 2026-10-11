@@ -14,10 +14,10 @@ To send messages to a selection:
 
 ```rust
 let hga = ctx.select("/user/comms/high_gain_1").unwrap();
-hga.try_tell("I've arrived safely".into(), None);
+hga.try_tell("I've arrived safely".into(), None)?;
 ```
 
-`try_tell` is the method used to send messages since a selection is a collection of `BasicActorRef`s. Any message sent to an actor in the selection that rejects the message type will be dropped.
+`try_tell` returns the number of unique actors whose mailboxes accepted the message; if traversal reaches the same actor by multiple paths, it receives the message only once. The method does not wait for actor processing to complete. It returns `SelectionSendError::NoRecipients` when the selection matches no actors, and `SelectionSendError::DeliveryFailed { delivered, failed }` when delivery fails for one or more selected actors. An actor that rejects the message type is counted as a failed delivery.
 
 While this example highlights how it's possible to message actors based on their path in practice it should be carefully considered. `ActorRef` (and even `BasicActorRef`) is almost always the better choice for actor interaction since messages are directly sent to the actor's mailbox without any preprocessing or cloning. However there are several use cases where `ActorSelection` makes sense:
 
@@ -28,7 +28,8 @@ It is possible to select all actors under an actor path and send the same messag
 
 ```rust
 let sel = ctx.selection("/user/home-control/lighting/*").unwrap();
-sel.try_tell(Protocol::Off, None);
+let delivered = sel.try_tell(Protocol::Off, None)?;
+println!("Message accepted by {delivered} lights");
 ```
 
 In this example an actor responsible for lighting in a home has a child actor for each individual light. If we want to turn off all lights a control message (`Protocol::Off`) could be sent to `/user/home-control/lighting/*`. Each child actor will receive the same message.

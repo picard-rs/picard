@@ -90,9 +90,7 @@ where
         if self.instances.contains_key(&id) {
             trace!(
                 "CQRS: Entity: {}, ID: {}, CMD: {:?}, State: running",
-                self.name,
-                id,
-                cmd
+                self.name, id, cmd
             );
             let entity = self.instances.get_mut(&id).unwrap();
             entity.actor.tell(cmd, sender);
@@ -100,9 +98,7 @@ where
         } else {
             trace!(
                 "CQRS: Entity: {}, ID: {}, CMD: {:?}, State: asleep",
-                self.name,
-                id,
-                cmd
+                self.name, id, cmd
             );
             let actor_name = entity_actor_name(&id);
             let entity = match ctx.actor_of_props(&actor_name, self.props.props(id.clone())) {

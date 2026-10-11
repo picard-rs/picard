@@ -49,7 +49,7 @@ fn select_child() {
     // select test actors through actor selection: /root/user/select-actor/*
     let sel = sys.select("select-actor").unwrap();
 
-    sel.try_tell(TestProbe(probe), None);
+    sel.try_tell(TestProbe(probe), None).unwrap();
 
     p_assert_eq!(listen, ());
 }
@@ -68,7 +68,7 @@ fn select_child_of_child() {
 
     // select test actors through actor selection: /root/user/select-actor/*
     let sel = sys.select("select-actor/child_a").unwrap();
-    sel.try_tell(TestProbe(probe), None);
+    sel.try_tell(TestProbe(probe), None).unwrap();
 
     // actors 'child_a' should fire a probe event
     p_assert_eq!(listen, ());
@@ -88,7 +88,7 @@ fn select_all_children_of_child() {
 
     // select relative test actors through actor selection: /root/user/select-actor/*
     let sel = sys.select("select-actor/*").unwrap();
-    sel.try_tell(TestProbe(probe.clone()), None);
+    sel.try_tell(TestProbe(probe.clone()), None).unwrap();
 
     // actors 'child_a' and 'child_b' should both fire a probe event
     p_assert_eq!(listen, ());
@@ -96,7 +96,7 @@ fn select_all_children_of_child() {
 
     // select absolute test actors through actor selection: /root/user/select-actor/*
     let sel = sys.select("/user/select-actor/*").unwrap();
-    sel.try_tell(TestProbe(probe), None);
+    sel.try_tell(TestProbe(probe), None).unwrap();
 
     // actors 'child_a' and 'child_b' should both fire a probe event
     p_assert_eq!(listen, ());
@@ -120,23 +120,23 @@ impl Actor for SelectTest2 {
     fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, _sender: Sender) {
         // up and down: ../select-actor/child_a
         let sel = ctx.select("../select-actor/child_a").unwrap();
-        sel.try_tell(msg.clone(), None);
+        sel.try_tell(msg.clone(), None).unwrap();
 
         // child: child_a
         let sel = ctx.select("child_a").unwrap();
-        sel.try_tell(msg.clone(), None);
+        sel.try_tell(msg.clone(), None).unwrap();
 
         // absolute: /user/select-actor/child_a
         let sel = ctx.select("/user/select-actor/child_a").unwrap();
-        sel.try_tell(msg.clone(), None);
+        sel.try_tell(msg.clone(), None).unwrap();
 
         // absolute all: /user/select-actor/*
         let sel = ctx.select("/user/select-actor/*").unwrap();
-        sel.try_tell(msg.clone(), None);
+        sel.try_tell(msg.clone(), None).unwrap();
 
         // all: *
         let sel = ctx.select("*").unwrap();
-        sel.try_tell(msg, None);
+        sel.try_tell(msg, None).unwrap();
     }
 }
 

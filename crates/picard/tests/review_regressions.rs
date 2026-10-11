@@ -23,43 +23,115 @@ fn named_selection_drops_unsupported_message_without_panicking() {
     system.actor_of::<StringActor>("string-actor").unwrap();
     let selection = system.select("string-actor").unwrap();
 
-    selection.try_tell(ProbeMessage, None);
+    assert_eq!(
+        selection.try_tell(ProbeMessage, None),
+        Err(SelectionSendError::DeliveryFailed {
+            delivered: 0,
+            failed: 1
+        })
+    );
+}
+
+#[test]
+fn named_selection_reports_missing_recipients() {
+    let system = ActorSystem::new().unwrap();
+    let selection = system.select("missing-actor").unwrap();
+
+    assert_eq!(
+        selection.try_tell(ProbeMessage, None),
+        Err(SelectionSendError::NoRecipients)
+    );
 }
 
 #[derive(Default)]
-struct EmptyActor;
+struct OtherMessageActor;
 
-impl Actor for EmptyActor {
-    type Msg = ();
+impl Actor for OtherMessageActor {
+    type Msg = u8;
 
     fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {}
 }
 
+struct RecordingStringActor(ChannelSender<String>);
+
+impl ActorFactoryArgs<ChannelSender<String>> for RecordingStringActor {
+    fn create_args(sender: ChannelSender<String>) -> Self {
+        Self(sender)
+    }
+}
+
+impl Actor for RecordingStringActor {
+    type Msg = String;
+
+    fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
+        let _ = self.0.send(msg);
+    }
+}
+
 #[test]
-fn named_selection_sys_tell_sends_system_message() {
+fn selection_reports_partial_delivery_failures() {
     let system = ActorSystem::new().unwrap();
+    let (tx, rx) = mpsc::channel();
     system
-        .actor_of::<EmptyActor>("stopped-by-selection")
+        .actor_of_args::<RecordingStringActor, _>("selection-recorder", tx)
         .unwrap();
-    let selection = system.select("stopped-by-selection").unwrap();
+    system
+        .actor_of::<OtherMessageActor>("selection-other")
+        .unwrap();
+    let selection = system.select("*").unwrap();
 
-    selection.sys_tell(SystemMsg::Command(picard::system::SystemCmd::Stop), None);
+    assert_eq!(
+        selection.try_tell("delivered".to_owned(), None),
+        Err(SelectionSendError::DeliveryFailed {
+            delivered: 1,
+            failed: 1
+        })
+    );
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        "delivered"
+    );
+}
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while system
-        .user_root()
-        .children()
-        .any(|child| child.name() == "stopped-by-selection")
-        && std::time::Instant::now() < deadline
-    {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+struct SelectionParent(ChannelSender<()>);
+
+impl ActorFactoryArgs<ChannelSender<()>> for SelectionParent {
+    fn create_args(ready: ChannelSender<()>) -> Self {
+        Self(ready)
+    }
+}
+
+impl Actor for SelectionParent {
+    type Msg = String;
+
+    fn pre_start(&mut self, ctx: &Context<Self::Msg>) {
+        ctx.actor_of::<StringActor>("child-a").unwrap();
+        ctx.actor_of::<StringActor>("child-b").unwrap();
+        let _ = self.0.send(());
     }
 
+    fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {
+        let _ = self.0.send(());
+    }
+}
+
+#[test]
+fn selection_deduplicates_recipients_reached_through_parent_navigation() {
+    let system = ActorSystem::new().unwrap();
+    let (tx, rx) = mpsc::channel();
+    system
+        .actor_of_args::<SelectionParent, _>("selection-parent", tx)
+        .unwrap();
+    rx.recv_timeout(Duration::from_secs(1))
+        .expect("parent should finish creating children");
+
+    let selection = system.select("selection-parent/*/..").unwrap();
+    assert_eq!(selection.try_tell("once".to_owned(), None), Ok(1));
+    rx.recv_timeout(Duration::from_secs(1))
+        .expect("selection should deliver to its unique parent");
     assert!(
-        !system
-            .user_root()
-            .children()
-            .any(|child| child.name() == "stopped-by-selection")
+        rx.recv_timeout(Duration::from_millis(200)).is_err(),
+        "duplicate delivery to parent"
     );
 }
 
@@ -84,6 +156,85 @@ fn failed_actor_creation_releases_reserved_path() {
         Err(CreateError::Panicked)
     ));
     assert!(system.actor_of::<RetryActor>("retry-after-failure").is_ok());
+}
+
+#[derive(Debug)]
+struct MoveOnlyMessage(mpsc::Sender<String>);
+
+#[derive(Default)]
+struct MoveOnlyActor;
+
+impl Actor for MoveOnlyActor {
+    type Msg = MoveOnlyMessage;
+
+    fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
+        let _ = msg.0.send("received without cloning".into());
+    }
+}
+
+#[test]
+fn actor_messages_do_not_need_to_be_cloneable() {
+    let system = ActorSystem::new().unwrap();
+    let actor = system.actor_of::<MoveOnlyActor>("move-only").unwrap();
+    let (tx, rx) = mpsc::channel();
+
+    actor.tell(MoveOnlyMessage(tx), None);
+
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        "received without cloning"
+    );
+}
+
+#[test]
+fn repeatable_any_message_survives_mismatched_and_repeated_downcasts() {
+    let mut message = picard::AnyMessage::new_repeatable(String::from("repeat"));
+
+    assert!(message.take::<u8>().is_err());
+    let mut first = message
+        .take::<String>()
+        .ok()
+        .expect("matching message type");
+    first.push_str("-changed");
+    assert_eq!(
+        message.take::<String>().ok().expect("repeatable message"),
+        "repeat"
+    );
+}
+
+#[test]
+fn repeating_timer_delivers_message_on_multiple_intervals() {
+    let system = ActorSystem::new().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let actor = system
+        .actor_of_args::<RecordingStringActor, _>("repeating-timer-recorder", tx)
+        .unwrap();
+    let id = system.schedule(
+        Duration::from_millis(10),
+        Duration::from_millis(60),
+        actor,
+        None,
+        String::from("timer tick"),
+    );
+
+    for _ in 0..3 {
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            "timer tick"
+        );
+    }
+    system.cancel_schedule(id);
+}
+
+#[test]
+fn invalid_custom_config_returns_an_error() {
+    let mut config = config::Config::new();
+    config.set("dispatcher.pool_size", 0).unwrap();
+
+    assert!(matches!(
+        ActorSystem::with_config("invalid-config", config),
+        Err(picard::system::SystemError::Configuration(_))
+    ));
 }
 
 #[derive(Clone, Debug)]

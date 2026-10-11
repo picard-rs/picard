@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::system::LoggingSystem;
 use crate::{
     actor::actor_cell::{ActorCell, ExtendedCell},
+    actor::actor_ref::SystemTell,
     actor::*,
     kernel::kernel,
     kernel::mailbox::mailbox,
@@ -80,7 +81,7 @@ impl Provider {
         let actor = ActorRef::new(cell);
         let child = BasicActorRef::from(actor.clone());
         parent.cell.add_child(child);
-        actor.sys_tell(SystemMsg::ActorInit);
+        actor.send_system_message(SystemMsg::ActorInit);
 
         Ok(actor)
     }

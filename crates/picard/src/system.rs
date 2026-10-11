@@ -109,6 +109,7 @@ pub enum SystemEventType {
 pub enum SystemError {
     ModuleFailed(String),
     InvalidName(String),
+    Configuration(String),
 }
 
 impl fmt::Display for SystemError {
@@ -122,6 +123,9 @@ impl fmt::Display for SystemError {
                 "Failed to create actor system. Cause: Invalid actor system name ({})",
                 name
             )),
+            SystemError::Configuration(ref error) => {
+                write!(f, "Invalid actor system configuration: {error}")
+            }
         }
     }
 }
@@ -140,25 +144,25 @@ use std::{
 use chrono::prelude::*;
 use config::Config;
 use futures::{
+    Future,
     channel::oneshot,
     executor::{ThreadPool, ThreadPoolBuilder},
     future::RemoteHandle,
     task::{SpawnError, SpawnExt},
-    Future,
 };
 
 use uuid::Uuid;
 
 use crate::{
+    AnyMessage, Message,
     actor::{props::ActorFactory, *},
-    kernel::provider::{create_root, Provider},
+    kernel::provider::{Provider, create_root},
     load_config,
     system::logger::*,
     system::timer::*,
-    validate::{validate_name, InvalidPath},
-    AnyMessage, Message,
+    validate::{InvalidPath, validate_name},
 };
-use slog::{debug, Logger};
+use slog::{Logger, debug};
 
 // 0. error results on any
 // 1. visibility
@@ -188,8 +192,16 @@ impl SystemBuilder {
 
     pub fn create(self) -> Result<ActorSystem, SystemError> {
         let name = self.name.unwrap_or_else(|| "picard".to_string());
-        let cfg = self.cfg.unwrap_or_else(load_config);
-        let exec = self.exec.unwrap_or_else(|| default_exec(&cfg));
+        let mut cfg = match self.cfg {
+            Some(cfg) => cfg,
+            None => load_config()?,
+        };
+        crate::set_config_defaults(&mut cfg).map_err(SystemError::Configuration)?;
+        validate_config(&cfg)?;
+        let exec = match self.exec {
+            Some(exec) => exec,
+            None => default_exec(&cfg)?,
+        };
         let log = self
             .log
             .map(|log| LoggingSystem::new(log, None))
@@ -278,8 +290,9 @@ impl ActorSystem {
     ///
     /// Requires a type that implements the `Model` trait.
     pub fn new() -> Result<ActorSystem, SystemError> {
-        let cfg = load_config();
-        let exec = default_exec(&cfg);
+        let cfg = load_config()?;
+        validate_config(&cfg)?;
+        let exec = default_exec(&cfg)?;
         let log = default_log(&cfg);
 
         ActorSystem::create("picard", exec, log, cfg)
@@ -289,8 +302,9 @@ impl ActorSystem {
     ///
     /// Requires a type that implements the `Model` trait.
     pub fn with_name(name: &str) -> Result<ActorSystem, SystemError> {
-        let cfg = load_config();
-        let exec = default_exec(&cfg);
+        let cfg = load_config()?;
+        validate_config(&cfg)?;
+        let exec = default_exec(&cfg)?;
         let log = default_log(&cfg);
 
         ActorSystem::create(name, exec, log, cfg)
@@ -298,7 +312,10 @@ impl ActorSystem {
 
     /// Create a new `ActorSystem` instance bypassing default config behavior
     pub fn with_config(name: &str, cfg: Config) -> Result<ActorSystem, SystemError> {
-        let exec = default_exec(&cfg);
+        let mut cfg = cfg;
+        crate::set_config_defaults(&mut cfg).map_err(SystemError::Configuration)?;
+        validate_config(&cfg)?;
+        let exec = default_exec(&cfg)?;
         let log = default_log(&cfg);
 
         ActorSystem::create(name, exec, log, cfg)
@@ -561,7 +578,7 @@ impl ActorRefFactory for ActorSystem {
     }
 
     fn stop(&self, actor: impl ActorReference) {
-        actor.sys_tell(SystemCmd::Stop.into());
+        actor.stop();
     }
 }
 
@@ -600,7 +617,7 @@ impl ActorRefFactory for &ActorSystem {
     }
 
     fn stop(&self, actor: impl ActorReference) {
-        actor.sys_tell(SystemCmd::Stop.into());
+        actor.stop();
     }
 }
 
@@ -632,12 +649,8 @@ impl TmpActorRefFactory for ActorSystem {
         A: ActorFactoryArgs<Args>,
     {
         let name = format!("{}", rand::random::<u64>());
-        self.provider.create_actor(
-            Props::new_args::<A, _>(args),
-            &name,
-            self.temp_root(),
-            self,
-        )
+        self.provider
+            .create_actor(Props::new_args::<A, _>(args), &name, self.temp_root(), self)
     }
 }
 
@@ -704,7 +717,7 @@ impl Timer for ActorSystem {
     ) -> ScheduleId
     where
         T: Message + Into<M>,
-        M: Message,
+        M: Message + Clone,
     {
         let id = Uuid::new_v4();
         let msg: M = msg.into();
@@ -715,7 +728,7 @@ impl Timer for ActorSystem {
             interval,
             receiver: receiver.into(),
             sender,
-            msg: AnyMessage::new(msg, false),
+            msg: AnyMessage::new_repeatable(msg),
         };
 
         let _ = self.timer.send(Job::Repeat(job));
@@ -741,7 +754,7 @@ impl Timer for ActorSystem {
             send_at: Instant::now() + delay,
             receiver: receiver.into(),
             sender,
-            msg: AnyMessage::new(msg, true),
+            msg: AnyMessage::new(msg),
         };
 
         let _ = self.timer.send(Job::Once(job));
@@ -769,7 +782,7 @@ impl Timer for ActorSystem {
             send_at: Instant::now() + delay,
             receiver: receiver.into(),
             sender,
-            msg: AnyMessage::new(msg, true),
+            msg: AnyMessage::new(msg),
         };
 
         let _ = self.timer.send(Job::Once(job));
@@ -896,14 +909,63 @@ impl From<&Config> for ThreadPoolConfig {
     }
 }
 
-fn default_exec(cfg: &Config) -> ThreadPool {
+fn validate_config(cfg: &Config) -> Result<(), SystemError> {
+    cfg.get_bool("debug")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+    cfg.get_str("log.level")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+    cfg.get_str("log.date_format")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+    cfg.get_str("log.time_format")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+
+    let process_limit = cfg
+        .get_int("mailbox.msg_process_limit")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+    if !(1..=i64::from(u32::MAX)).contains(&process_limit) {
+        return Err(SystemError::Configuration(
+            "`mailbox.msg_process_limit` must be between 1 and u32::MAX".into(),
+        ));
+    }
+
+    let pool_size = cfg
+        .get_int("dispatcher.pool_size")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+    if pool_size <= 0 || usize::try_from(pool_size).is_err() {
+        return Err(SystemError::Configuration(
+            "`dispatcher.pool_size` must be a positive usize".into(),
+        ));
+    }
+
+    let stack_size = cfg
+        .get_int("dispatcher.stack_size")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+    if stack_size < 0 || usize::try_from(stack_size).is_err() {
+        return Err(SystemError::Configuration(
+            "`dispatcher.stack_size` must be a non-negative usize".into(),
+        ));
+    }
+
+    let frequency = cfg
+        .get_int("scheduler.frequency_millis")
+        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+    if frequency <= 0 || u64::try_from(frequency).is_err() {
+        return Err(SystemError::Configuration(
+            "`scheduler.frequency_millis` must be a positive u64".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn default_exec(cfg: &Config) -> Result<ThreadPool, SystemError> {
     let exec_cfg = ThreadPoolConfig::from(cfg);
     ThreadPoolBuilder::new()
         .pool_size(exec_cfg.pool_size)
         .stack_size(exec_cfg.stack_size)
         .name_prefix("pool-thread-#")
         .create()
-        .unwrap()
+        .map_err(|err| SystemError::Configuration(err.to_string()))
 }
 
 #[derive(Clone)]
@@ -967,9 +1029,10 @@ impl Actor for ShutdownActor {
         sender: Option<BasicActorRef>,
     ) {
         if let SystemMsg::Event(evt) = msg
-            && let SystemEvent::ActorTerminated(terminated) = evt {
-                self.receive(ctx, terminated, sender);
-            }
+            && let SystemEvent::ActorTerminated(terminated) = evt
+        {
+            self.receive(ctx, terminated, sender);
+        }
     }
 
     fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Option<BasicActorRef>) {}
@@ -986,8 +1049,9 @@ impl Receive<ActorTerminated> for ShutdownActor {
     ) {
         if &msg.actor == ctx.system.user_root()
             && let Ok(ref mut tx) = self.tx.lock()
-                && let Some(tx) = tx.take() {
-                    tx.send(()).unwrap();
-                }
+            && let Some(tx) = tx.take()
+        {
+            tx.send(()).unwrap();
+        }
     }
 }

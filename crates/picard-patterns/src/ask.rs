@@ -2,9 +2,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use futures::channel::oneshot::{channel, Sender as ChannelSender};
-use futures::future::RemoteHandle;
 use futures::FutureExt;
+use futures::channel::oneshot::{Sender as ChannelSender, channel};
+use futures::future::RemoteHandle;
 
 use picard::actors::*;
 

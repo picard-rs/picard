@@ -1,19 +1,20 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread;
 
 use crate::{
+    AnyMessage, Envelope, Message,
     actor::actor_cell::ExtendedCell,
+    actor::actor_ref::SystemTell,
     actor::*,
     kernel::{
-        queue::{queue, EnqueueResult, QueueEmpty, QueueReader, QueueWriter},
         Dock,
+        queue::{EnqueueResult, QueueEmpty, QueueReader, QueueWriter, queue},
     },
     system::ActorCreated,
     system::{ActorSystem, SystemEvent, SystemMsg},
-    AnyMessage, Envelope, Message,
 };
 
 pub trait MailboxSchedule {
@@ -39,10 +40,18 @@ pub trait AnySender: Send + Sync {
     fn is_sched(&self) -> bool;
 }
 
-#[derive(Clone)]
 pub struct MailboxSender<Msg: Message> {
     queue: QueueWriter<Msg>,
     scheduled: Arc<AtomicBool>,
+}
+
+impl<Msg: Message> Clone for MailboxSender<Msg> {
+    fn clone(&self) -> Self {
+        Self {
+            queue: self.queue.clone(),
+            scheduled: self.scheduled.clone(),
+        }
+    }
 }
 
 impl<Msg> MailboxSender<Msg>
@@ -350,7 +359,8 @@ where
             self.mbox.set_scheduled(false);
 
             // Message the parent (this failed actor's supervisor) to decide how to handle the failure
-            self.parent.sys_tell(SystemMsg::Failed(self.actor.clone()));
+            self.parent
+                .send_system_message(SystemMsg::Failed(self.actor.clone()));
         }
     }
 }
