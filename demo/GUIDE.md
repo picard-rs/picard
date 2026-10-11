@@ -17,7 +17,7 @@ Pages (`/demo/`). Picard is compiled to `wasm32-unknown-unknown` and runs in a W
 
 ```sh
 wasm-pack build demo --release --target web --out-dir web/pkg --no-default-features
-python3 -m http.server -d demo/web 8000       # then open http://localhost:8000/?worker
+python3 -m http.server -d demo/web 8000       # then open http://localhost:8000
 ```
 
 Differences from the native server: there are no threads, so all actors share one thread

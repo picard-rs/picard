@@ -71,7 +71,7 @@ jobs:
         run: |
           wasm-pack build demo --release --target web --out-dir web/pkg --no-default-features
           mkdir -p _site/demo/pkg
-          sed 's|<meta name="transport" content="ws">|<meta name="transport" content="worker">|' demo/web/index.html > _site/demo/index.html
+          cp demo/web/index.html _site/demo/
           cp demo/web/worker.js _site/demo/
           cp demo/web/pkg/living_city.js demo/web/pkg/living_city_bg.wasm _site/demo/pkg/
 

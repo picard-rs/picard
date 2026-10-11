@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta name="transport" content="ws">
 <meta charset="utf-8">
 <title>Living City · Picard actor showcase</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -125,9 +124,10 @@ const STATE_NAMES = ["moving", "waiting", "crossing", "parked"];
 const COUNTS = [100, 1000, 5000, 10000];
 
 // "ws": the native server streams frames over a WebSocket. "worker": the simulation runs as
-// WebAssembly in a Web Worker next to the page (the GitHub Pages build).
-const MODE = new URLSearchParams(location.search).has("worker")
-  ? "worker" : (document.querySelector('meta[name="transport"]')?.content || "ws");
+// WebAssembly in a Web Worker next to the page (the GitHub Pages build; `?worker` forces it).
+// Set by connect(): the native server answers /api/metrics, anything else (GitHub Pages, a plain
+// static file server) gets the WebAssembly simulation running in a Web Worker.
+let MODE = "ws";
 let link = null;
 
 function send(o) { if (link) link(JSON.stringify(o)); }
@@ -142,8 +142,12 @@ function setLive(on) {
   $("conn").textContent = on ? "live" : "offline"; $("conn").className = on ? "on" : "";
 }
 
-function connect() {
-  if (MODE === "worker") return connectWorker();
+async function connect() {
+  if (!ws) {
+    const forced = new URLSearchParams(location.search).has("worker");
+    const native = !forced && await fetch("api/metrics").then(r => r.ok, () => false);
+    if (!native) { MODE = "worker"; return connectWorker(); }
+  }
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
   ws.onopen = () => { link = t => ws.readyState === 1 && ws.send(t); setLive(true); if (selected) send({cmd: "select", id: selected.id}); };
   ws.onclose = () => { link = null; setLive(false); setTimeout(connect, 1000); };

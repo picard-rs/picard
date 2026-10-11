@@ -65,7 +65,7 @@ cargo bench -p picard --bench runtime                   # Criterion: message thr
 cargo bench -p picard --bench actor_suite               # Criterion: CAF-style benchmark suite
 cargo run -p living-city --release                      # Living City demo on http://127.0.0.1:8080
 cargo run -p living-city --release -- loadtest          # headless load test, prints a markdown table
-wasm-pack build demo --release --target web --out-dir web/pkg --no-default-features   # wasm demo, serve demo/web with ?worker
+wasm-pack build demo --release --target web --out-dir web/pkg --no-default-features   # wasm demo, serve demo/web
 ```
 
 Indicative Criterion measurements (one machine, not a controlled benchmark): `actor_creation` about 5 µs per actor, `actor_round_trip` about 8 µs, `typed_tell` about 33 ns.
