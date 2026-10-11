@@ -62,7 +62,7 @@ cargo bench -p picard --bench runtime                   # Criterion: message thr
 cargo bench -p picard --bench actor_suite               # Criterion: CAF-style benchmark suite
 ```
 
-Indicative Criterion measurements (one machine, not a controlled benchmark): `actor_creation` about 4.5 µs per actor, `actor_round_trip` about 8 µs, `typed_tell` about 33 ns.
+Indicative Criterion measurements (one machine, not a controlled benchmark): `actor_creation` about 5 µs per actor, `actor_round_trip` about 8 µs, `typed_tell` about 33 ns.
 
 ## Conventions
 
@@ -74,6 +74,6 @@ Indicative Criterion measurements (one machine, not a controlled benchmark): `ac
 
 ## Known gaps
 
-- Clippy pedantic noise is untouched (`use_self`, missing `# Errors` docs, `#[must_use]`).
-- Actor creation uses much more memory than CAF in the benchmark comparison, and `mixed_case` is about 2x slower than CAF.
-- `.github/workflows` and `.pre-commit-config.yaml` still reflect the pre-workspace layout (`./`, `./picard-macros/`), and the workflows only trigger on `master`.
+- Memory per live actor is about 4 KiB (down from about 12 KiB), still above CAF. Most of it is the two crossbeam queues per actor. A `Mutex<VecDeque>` queue halves it but makes `typed_tell` about 3x slower (33 ns to 111 ns), so crossbeam stays.
+- `mixed_case` in the CAF-style suite was about 2x slower than CAF (measured before the latest optimisations) and has not been re-investigated.
+- Clippy pedantic is enabled workspace-wide with a documented allow-list in the root `Cargo.toml`; remaining allowed lints would change public signatures.
