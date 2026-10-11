@@ -1,4 +1,4 @@
-use dashmap::DashMap;
+use dashmap::DashSet;
 use slog::trace;
 
 use std::sync::Arc;
@@ -20,13 +20,13 @@ pub struct Provider {
 }
 
 struct ProviderInner {
-    paths: DashMap<ActorPath, ()>,
+    paths: DashSet<ActorPath>,
 }
 
 impl Provider {
     pub fn new() -> Self {
         let inner = ProviderInner {
-            paths: DashMap::new(),
+            paths: DashSet::new(),
         };
 
         Provider {
@@ -87,11 +87,10 @@ impl Provider {
     }
 
     fn register(&self, path: &ActorPath) -> Result<(), CreateError> {
-        let old = self.inner.paths.insert(path.clone(), ());
-        if old.is_some() {
-            Err(CreateError::AlreadyExists(path.clone()))
-        } else {
+        if self.inner.paths.insert(path.clone()) {
             Ok(())
+        } else {
+            Err(CreateError::AlreadyExists(path.clone()))
         }
     }
 

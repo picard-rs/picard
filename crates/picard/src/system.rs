@@ -614,7 +614,7 @@ impl TmpActorRefFactory for ActorSystem {
     where
         A: Actor,
     {
-        let name = format!("{}", rand::random::<u64>());
+        let name = rand::random::<u64>().to_string();
         self.provider
             .create_actor(props, &name, self.temp_root(), self)
     }
@@ -623,7 +623,7 @@ impl TmpActorRefFactory for ActorSystem {
     where
         A: ActorFactory,
     {
-        let name = format!("{}", rand::random::<u64>());
+        let name = rand::random::<u64>().to_string();
         self.provider
             .create_actor(Props::new::<A>(), &name, self.temp_root(), self)
     }
@@ -636,7 +636,7 @@ impl TmpActorRefFactory for ActorSystem {
         Args: ActorArgs,
         A: ActorFactoryArgs<Args>,
     {
-        let name = format!("{}", rand::random::<u64>());
+        let name = rand::random::<u64>().to_string();
         self.provider
             .create_actor(Props::new_args::<A, _>(args), &name, self.temp_root(), self)
     }
@@ -937,7 +937,7 @@ pub struct MailboxConfig {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct DispatcherConfig {
-    #[default(num_cpus::get() * 2)]
+    #[default(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) * 2)]
     pub pool_size: usize,
     pub stack_size: usize,
 }
