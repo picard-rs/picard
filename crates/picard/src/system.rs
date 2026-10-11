@@ -21,7 +21,6 @@ pub enum SystemMsg {
     Failed(BasicActorRef),
 }
 
-
 #[derive(Clone, Debug)]
 pub enum SystemCmd {
     Stop,
@@ -322,7 +321,7 @@ impl ActorSystem {
         }
 
         let prov = Provider::new();
-        let timer = BasicTimer::start(&cfg);
+        let timer = BasicTimer::start();
 
         // 1. create proto system
         let proto = ProtoSystem {
@@ -517,7 +516,6 @@ impl ActorSystem {
         rx
     }
 }
-
 
 impl ActorRefFactory for ActorSystem {
     fn actor_of_props<A>(
@@ -894,7 +892,6 @@ pub struct PicardConfig {
     pub log: LogConfig,
     pub mailbox: MailboxConfig,
     pub dispatcher: DispatcherConfig,
-    pub scheduler: SchedulerConfig,
     pub cqrs: CqrsConfig,
     /// Free-form application settings (the `[app]` section)
     pub app: HashMap<String, config::Value>,
@@ -932,15 +929,6 @@ pub struct DispatcherConfig {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct SchedulerConfig {
-    /// Retained for configuration compatibility. The default timer now sleeps
-    /// until the next deadline instead of polling at this interval.
-    #[default(50)]
-    pub frequency_millis: u64,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
 pub struct CqrsConfig {
     #[default(120)]
     pub sleep_after_secs: u64,
@@ -953,9 +941,6 @@ fn validate_config(cfg: &PicardConfig) -> Result<(), SystemError> {
     }
     if cfg.dispatcher.pool_size == 0 {
         return invalid("`dispatcher.pool_size` must be a positive usize");
-    }
-    if cfg.scheduler.frequency_millis == 0 {
-        return invalid("`scheduler.frequency_millis` must be a positive u64");
     }
     Ok(())
 }

@@ -28,6 +28,3 @@ msg_process_limit = 1000
 [dispatcher]
 # number of threads available to the CPU pool
 pool_size = 4
-
-[scheduler]
-frequency_millis = 50

@@ -21,9 +21,6 @@ fn benchmark_system() -> ActorSystem {
             pool_size: 4,
             ..Default::default()
         },
-        scheduler: SchedulerConfig {
-            frequency_millis: 1,
-        },
         ..Default::default()
     };
     ActorSystem::with_config("actor-suite-bench", config).unwrap()

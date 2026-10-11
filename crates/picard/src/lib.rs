@@ -117,8 +117,8 @@ impl Debug for AnyMessage {
 pub mod actors {
     pub use crate::actor::*;
     pub use crate::system::{
-        ActorSystem, DispatcherConfig, LogConfig, PicardConfig, Run, ScheduleId, SchedulerConfig,
-        SystemBuilder, SystemEvent, SystemMsg, Timer,
+        ActorSystem, DispatcherConfig, LogConfig, PicardConfig, Run, ScheduleId, SystemBuilder,
+        SystemEvent, SystemMsg, Timer,
     };
     pub use crate::{AnyMessage, Message};
 }

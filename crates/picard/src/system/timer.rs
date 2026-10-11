@@ -9,7 +9,6 @@ use std::{
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::system::PicardConfig;
 use crate::{
     AnyMessage, Message,
     actor::{ActorRef, BasicActorRef, Sender},
@@ -122,7 +121,7 @@ pub struct BasicTimer {
 }
 
 impl BasicTimer {
-    pub fn start(_cfg: &PicardConfig) -> TimerRef {
+    pub fn start() -> TimerRef {
         let mut process = BasicTimer::default();
         let (tx, rx) = mpsc::channel();
 
