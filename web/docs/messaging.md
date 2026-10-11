@@ -74,7 +74,7 @@ impl Receive<Print> for Counter {
 fn main() {
     let sys = ActorSystem::new().unwrap();
 
-    let props = Props::new::<Counter>();
+    let props = Props::produce::<Counter>();
     let actor = sys.actor_of_props(props, "counter").unwrap();
     actor.tell(Add, None);
     actor.tell(Add, None);

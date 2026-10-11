@@ -29,7 +29,7 @@ impl Actor for MyActor {
 fn main() {
     let sys = ActorSystem::new().unwrap();
 
-    let props = Props::new::<MyActor>();
+    let props = Props::produce::<MyActor>();
     let my_actor = sys.actor_of_props(props, "my-actor");
 
     // ask returns a future that automatically is driven

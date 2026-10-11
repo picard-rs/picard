@@ -50,7 +50,7 @@ impl Props {
         A: Actor + Send + 'static,
         F: Fn() -> A + Send + 'static,
     {
-        Arc::new(Mutex::new(ActorProps::new(creator)))
+        Arc::new(Mutex::new(ActorProps::produce(creator)))
     }
 
     /// Creates an `ActorProducer` with one or more factory method parameters.
@@ -124,7 +124,7 @@ impl Props {
         Args: ActorArgs,
         F: Fn(Args) -> A + Send + 'static,
     {
-        Arc::new(Mutex::new(ActorPropsWithArgs::new(creator, args)))
+        Arc::new(Mutex::new(ActorPropsWithArgs::produce(creator, args)))
     }
 
     /// Creates an `ActorProducer` from default constructible type with no factory method parameters.
@@ -144,7 +144,7 @@ impl Props {
     /// // main
     /// let sys = ActorSystem::new().unwrap();
     ///
-    /// let props = Props::new::<User>();
+    /// let props = Props::produce::<User>();
     ///
     /// // start the actor and get an `ActorRef`
     /// let actor = sys.actor_of_props("user", props).unwrap();
@@ -171,13 +171,13 @@ impl Props {
     /// // main
     /// let sys = ActorSystem::new().unwrap();
     ///
-    /// let props = Props::new::<User>();
+    /// let props = Props::produce::<User>();
     ///
     /// // start the actor and get an `ActorRef`
     /// let actor = sys.actor_of_props("user", props).unwrap();
     /// ```
     #[inline]
-    pub fn new<A>() -> Arc<Mutex<impl ActorProducer<Actor = A>>>
+    pub fn produce<A>() -> Arc<Mutex<impl ActorProducer<Actor = A>>>
     where
         A: ActorFactory,
     {
@@ -287,8 +287,8 @@ pub trait ActorProducer: fmt::Debug + Send + UnwindSafe + RefUnwindSafe {
     /// Produces an instance of an `Actor`.
     ///
     /// The underlying factory method provided
-    /// in the original `Props::new(f: Fn() -> A + Send`) or
-    /// `Props::new(f: Fn(Args) -> A + Send>, args: Args)` is called.
+    /// in the original `Props::produce(f: Fn() -> A + Send`) or
+    /// `Props::produce(f: Fn(Args) -> A + Send>, args: Args)` is called.
     ///
     /// Any parameters `Args` will be cloned and passed to the function.
     ///
@@ -342,7 +342,7 @@ impl<A> ActorProps<A>
 where
     A: Actor + Send + 'static,
 {
-    pub fn new<F>(creator: F) -> impl ActorProducer<Actor = A>
+    pub fn produce<F>(creator: F) -> impl ActorProducer<Actor = A>
     where
         F: Fn() -> A + Send + 'static,
     {
@@ -389,7 +389,7 @@ where
     A: Actor + Send + 'static,
     Args: ActorArgs,
 {
-    pub fn new<F>(creator: F, args: Args) -> impl ActorProducer<Actor = A>
+    pub fn produce<F>(creator: F, args: Args) -> impl ActorProducer<Actor = A>
     where
         F: Fn(Args) -> A + Send + 'static,
     {
