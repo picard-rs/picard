@@ -15,7 +15,6 @@ config.workspace = true
 chrono = "0.4"
 futures = { version = "0.3.4", features = ["thread-pool"] }
 rand = "0.7"
-regex = "1"
 uuid = { version = "0.8.1", features = ["v4"] }
 pin-utils = "0.1.0"
 slog = "2.5"
