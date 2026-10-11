@@ -38,6 +38,8 @@ Other top-level items:
 - `system/timer.rs`: `BasicTimer`, a deadline-heap timer thread that sleeps until the next job and exits when its sender is dropped. On wasm it is driven by host timeouts (`WasmTimerRef`).
 - `platform.rs`: per-target `Instant` and `Executor`. Native: `std::time::Instant` and the futures `ThreadPool`. `wasm32`: `web_time::Instant` and a single-threaded executor on the browser event loop. Use `picard::platform::Instant`, never `std::time::Instant`, in code that must run on wasm.
 - `system/logger.rs`: slog-based non-blocking logger.
+- `system/stats.rs` (feature `stats`): padded atomic counters behind `ActorSystem::stats()`. Recorded in `kernel.rs` (create/restart/terminate) and the send funnels in `actor_cell.rs` (`send_msg`, `send_any_msg`, `send_sys_msg`).
+- Feature `tracing`: `#[cfg(feature = "tracing")]` events at the same lifecycle points, panics (`Sentinel`), supervision, and a `TRACE` `recv` span in `mailbox.rs`. Both features are documented in `web/docs/diagnostics.md`; test them with `cargo test -p picard --all-features`.
 - `actor.rs`, `actor/`: `Actor` trait, `Props`, `ActorRef`/`BasicActorRef`, `ActorCell`, paths and URIs, channels, selection.
 - `kernel.rs`, `kernel/`: per-actor kernel task, `mailbox.rs` (user and system queues, scheduling flags), `queue.rs` (crossbeam channel), `provider.rs` (actor creation, path registry), `kernel_ref.rs`.
 - `validate.rs`: actor name and path validation (plain char checks, no regex).
@@ -59,6 +61,7 @@ Other top-level items:
 ```sh
 cargo build --workspace --all-targets
 cargo test --workspace
+cargo test -p picard --all-features                     # includes the `tracing` and `stats` features
 cargo clippy --workspace --all-targets -- -D warnings   # must stay clean
 cargo fmt --all
 cargo bench -p picard --bench runtime                   # Criterion: message throughput, round trip, creation

@@ -11,6 +11,7 @@
 - [Message Scheduling](scheduling.md)
 - [Configuration](config.md)
 - [Logging](logging.md)
+- [Diagnostics](diagnostics.md)
 - [Running Futures](futures.md)
 - [Testing](testing.md)
 - [Patterns](patterns.md)

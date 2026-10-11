@@ -117,6 +117,8 @@ impl Debug for AnyMessage {
 
 pub mod actors {
     pub use crate::actor::*;
+    #[cfg(feature = "stats")]
+    pub use crate::system::RuntimeStats;
     pub use crate::system::{
         ActorSystem, DispatcherConfig, LogConfig, PicardConfig, Run, ScheduleId, SystemBuilder,
         SystemEvent, SystemMsg, Timer,

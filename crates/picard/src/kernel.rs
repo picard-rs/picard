@@ -73,6 +73,15 @@ where
 
     let actor_ref = ActorRef::new(cell);
 
+    #[cfg(feature = "stats")]
+    sys.stats_recorder().actor_created();
+    #[cfg(feature = "tracing")]
+    tracing::debug!(
+        actor = %actor_ref.path(),
+        actor_type = std::any::type_name::<A>(),
+        "actor created"
+    );
+
     let f = async move {
         while let Some(msg) = rx.next().await {
             match msg {
@@ -114,15 +123,18 @@ fn restart_actor<A>(
     A: Actor,
 {
     let mut a = dock.actor.lock().unwrap();
-    match start_actor(props) {
-        Ok(actor) => {
-            *a = Some(actor);
-            actor_ref.send_system_message(SystemMsg::ActorInit);
-            sys.publish_event(ActorRestarted { actor: actor_ref }.into());
-        }
-        Err(_) => {
-            warn!(sys.log(), "Actor failed to restart: {:?}", actor_ref);
-        }
+    if let Ok(actor) = start_actor(props) {
+        *a = Some(actor);
+        #[cfg(feature = "stats")]
+        sys.stats_recorder().actor_restarted();
+        #[cfg(feature = "tracing")]
+        tracing::info!(actor = %actor_ref.path(), "actor restarted");
+        actor_ref.send_system_message(SystemMsg::ActorInit);
+        sys.publish_event(ActorRestarted { actor: actor_ref }.into());
+    } else {
+        #[cfg(feature = "tracing")]
+        tracing::warn!(actor = %actor_ref.path(), "actor failed to restart");
+        warn!(sys.log(), "Actor failed to restart: {:?}", actor_ref);
     }
 }
 
@@ -131,6 +143,10 @@ where
     Msg: Message,
 {
     sys.provider.unregister(actor_ref.path());
+    #[cfg(feature = "stats")]
+    sys.stats_recorder().actor_terminated();
+    #[cfg(feature = "tracing")]
+    tracing::debug!(actor = %actor_ref.path(), "actor terminated");
     flush_to_deadletters(mbox, &actor_ref, sys);
     sys.publish_event(
         ActorTerminated {

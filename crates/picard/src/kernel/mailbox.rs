@@ -240,6 +240,13 @@ fn process_msgs<A>(
             match mbox.try_dequeue() {
                 Ok(msg) => {
                     let (msg, sender) = (msg.msg, msg.sender);
+                    #[cfg(feature = "tracing")]
+                    let _span = tracing::trace_span!(
+                        "recv",
+                        actor = %ctx.myself.path(),
+                        msg_type = std::any::type_name::<A::Msg>()
+                    )
+                    .entered();
                     actor.as_mut().unwrap().recv(ctx, msg, sender);
                     process_sys_msgs(mbox, ctx, cell, actor);
 
@@ -347,6 +354,9 @@ where
 {
     fn drop(&mut self) {
         if thread::panicking() {
+            #[cfg(feature = "tracing")]
+            tracing::error!(actor = %self.actor.path(), "actor panicked; reporting failure to parent");
+
             // Suspend the mailbox to prevent further message processing
             self.mbox.set_suspended(true);
 

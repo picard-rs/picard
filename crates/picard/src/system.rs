@@ -1,4 +1,6 @@
 pub(crate) mod logger;
+#[cfg(feature = "stats")]
+pub(crate) mod stats;
 pub(crate) mod timer;
 
 use std::{collections::HashMap, fmt};
@@ -11,6 +13,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 // Public picard::system API (plus the pub data types in this file)
+#[cfg(feature = "stats")]
+pub use self::stats::RuntimeStats;
 pub use self::timer::{BasicTimer, ScheduleId, Timer};
 
 #[derive(Clone, Debug)]
@@ -173,6 +177,8 @@ pub struct ProtoSystem {
     pub(crate) sys_settings: SystemSettings,
     started_at: DateTime<Utc>,
     started_instant: Instant,
+    #[cfg(feature = "stats")]
+    stats: stats::StatsRecorder,
 }
 
 #[derive(Default)]
@@ -343,6 +349,8 @@ impl ActorSystem {
             sys_settings: SystemSettings::from(&cfg),
             started_at: Utc::now(),
             started_instant: Instant::now(),
+            #[cfg(feature = "stats")]
+            stats: stats::StatsRecorder::default(),
         };
 
         // 2. create uninitialized system
@@ -375,6 +383,8 @@ impl ActorSystem {
         sys.complete_start();
 
         debug!(sys.log, "Actor system [{}] [{}] started", sys.id(), name);
+        #[cfg(feature = "tracing")]
+        tracing::info!(system = name, id = %sys.id(), "actor system started");
 
         Ok(sys)
     }
@@ -472,6 +482,20 @@ impl ActorSystem {
         &self.proto.sys_settings
     }
 
+    /// Returns a snapshot of the runtime statistics collected since the system started
+    ///
+    /// Requires the `stats` feature.
+    #[cfg(feature = "stats")]
+    pub fn stats(&self) -> RuntimeStats {
+        self.proto.stats.snapshot()
+    }
+
+    #[cfg(feature = "stats")]
+    #[inline]
+    pub(crate) fn stats_recorder(&self) -> &stats::StatsRecorder {
+        &self.proto.stats
+    }
+
     /// Create an actor under the system root
     pub fn sys_actor_of_props<A>(
         &self,
@@ -519,6 +543,9 @@ impl ActorSystem {
     /// Does not block. Returns a future which is completed when all
     /// actors have successfully stopped.
     pub fn shutdown(&self) -> Shutdown {
+        #[cfg(feature = "tracing")]
+        tracing::info!(system = %self.proto.name, id = %self.id(), "actor system shutting down");
+
         let (tx, rx) = oneshot::channel::<()>();
         let tx = Arc::new(Mutex::new(Some(tx)));
 

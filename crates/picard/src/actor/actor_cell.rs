@@ -124,14 +124,27 @@ impl ActorCell {
         let mb = &self.inner.mailbox;
         let k = self.kernel();
 
-        dispatch_any(msg, sender, mb, k)
+        let res = dispatch_any(msg, sender, mb, k);
+        #[cfg(feature = "stats")]
+        self.inner.system.stats_recorder().message_sent(res.is_ok());
+        #[cfg(feature = "tracing")]
+        if res.is_err() {
+            tracing::debug!(actor = %self.uri().path, "message could not be delivered");
+        }
+        res
     }
 
     pub(crate) fn send_sys_msg(&self, msg: Envelope<SystemMsg>) -> MsgResult<Envelope<SystemMsg>> {
         let mb = &self.inner.sys_mailbox;
 
         let k = self.kernel();
-        dispatch(msg, mb, k)
+        let res = dispatch(msg, mb, k);
+        #[cfg(feature = "stats")]
+        self.inner
+            .system
+            .stats_recorder()
+            .system_message_sent(res.is_ok());
+        res
     }
 
     pub(crate) fn is_child(&self, actor: &BasicActorRef) -> bool {
@@ -206,6 +219,17 @@ impl ActorCell {
     }
 
     pub fn handle_failure(&self, failed: BasicActorRef, strategy: Strategy) {
+        #[cfg(feature = "tracing")]
+        tracing::warn!(
+            supervisor = %self.uri().path,
+            actor = %failed.path(),
+            strategy = match strategy {
+                Strategy::Stop => "stop",
+                Strategy::Restart => "restart",
+                Strategy::Escalate => "escalate",
+            },
+            "supervising failed child"
+        );
         match strategy {
             Strategy::Stop => self.stop(&failed),
             Strategy::Restart => self.restart_child(&failed),
@@ -369,7 +393,20 @@ where
         let mb = &self.mailbox;
         let k = self.cell.kernel();
 
-        dispatch(msg, mb, k).inspect_err(|e| {
+        let res = dispatch(msg, mb, k);
+        #[cfg(feature = "stats")]
+        self.cell
+            .inner
+            .system
+            .stats_recorder()
+            .message_sent(res.is_ok());
+        res.inspect_err(|e| {
+            #[cfg(feature = "tracing")]
+            tracing::debug!(
+                actor = %self.cell.uri().path,
+                msg_type = std::any::type_name::<Msg>(),
+                "message could not be delivered; sending to dead letters"
+            );
             let dl = DeadLetter {
                 msg: format!("{:?}", e.msg.msg),
                 sender: e.msg.sender.clone(),
