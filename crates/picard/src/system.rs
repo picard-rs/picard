@@ -1,9 +1,14 @@
 pub(crate) mod logger;
 pub(crate) mod timer;
 
-use std::fmt;
+use std::{collections::HashMap, fmt};
+
+use better_default::Default;
+use config::ConfigError;
 
 use crate::actor::BasicActorRef;
+use serde::Deserialize;
+use thiserror::Error;
 
 // Public picard::system API (plus the pub data types in this file)
 pub use self::timer::{BasicTimer, ScheduleId, Timer};
@@ -106,28 +111,16 @@ pub enum SystemEventType {
     ActorCreated,
 }
 
+#[derive(Error)]
 pub enum SystemError {
+    #[error("Failed to create actor system. Cause: Sub module failed to start ({0})")]
     ModuleFailed(String),
+    #[error("Failed to create actor system. Cause: Sub module failed to start ({0})")]
     InvalidName(String),
-    Configuration(String),
-}
-
-impl fmt::Display for SystemError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            SystemError::ModuleFailed(ref m) => f.write_str(&format!(
-                "Failed to create actor system. Cause: Sub module failed to start ({})",
-                m
-            )),
-            SystemError::InvalidName(ref name) => f.write_str(&format!(
-                "Failed to create actor system. Cause: Invalid actor system name ({})",
-                name
-            )),
-            SystemError::Configuration(ref error) => {
-                write!(f, "Invalid actor system configuration: {error}")
-            }
-        }
-    }
+    #[error("Invalid actor system configuration: {0}")]
+    Configuration(#[from] config::ConfigError),
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
 }
 
 impl fmt::Debug for SystemError {
@@ -142,7 +135,6 @@ use std::{
 };
 
 use chrono::prelude::*;
-use config::Config;
 use futures::{
     Future,
     channel::oneshot,
@@ -171,7 +163,7 @@ pub struct ProtoSystem {
     id: Uuid,
     name: String,
     pub host: Arc<str>,
-    config: Config,
+    config: PicardConfig,
     pub(crate) sys_settings: SystemSettings,
     started_at: DateTime<Utc>,
     started_instant: Instant,
@@ -180,7 +172,7 @@ pub struct ProtoSystem {
 #[derive(Default)]
 pub struct SystemBuilder {
     name: Option<String>,
-    cfg: Option<Config>,
+    cfg: Option<PicardConfig>,
     log: Option<Logger>,
     exec: Option<ThreadPool>,
 }
@@ -192,12 +184,10 @@ impl SystemBuilder {
 
     pub fn create(self) -> Result<ActorSystem, SystemError> {
         let name = self.name.unwrap_or_else(|| "picard".to_string());
-        let mut cfg = match self.cfg {
+        let cfg = match self.cfg {
             Some(cfg) => cfg,
             None => load_config()?,
         };
-        crate::set_config_defaults(&mut cfg).map_err(SystemError::Configuration)?;
-        validate_config(&cfg)?;
         let exec = match self.exec {
             Some(exec) => exec,
             None => default_exec(&cfg)?,
@@ -217,7 +207,7 @@ impl SystemBuilder {
         }
     }
 
-    pub fn cfg(self, cfg: Config) -> Self {
+    pub fn cfg(self, cfg: PicardConfig) -> Self {
         SystemBuilder {
             cfg: Some(cfg),
             ..self
@@ -311,9 +301,7 @@ impl ActorSystem {
     }
 
     /// Create a new `ActorSystem` instance bypassing default config behavior
-    pub fn with_config(name: &str, cfg: Config) -> Result<ActorSystem, SystemError> {
-        let mut cfg = cfg;
-        crate::set_config_defaults(&mut cfg).map_err(SystemError::Configuration)?;
+    pub fn with_config(name: &str, cfg: PicardConfig) -> Result<ActorSystem, SystemError> {
         validate_config(&cfg)?;
         let exec = default_exec(&cfg)?;
         let log = default_log(&cfg);
@@ -325,11 +313,11 @@ impl ActorSystem {
         name: &str,
         exec: ThreadPool,
         log: LoggingSystem,
-        cfg: Config,
+        cfg: PicardConfig,
     ) -> Result<ActorSystem, SystemError> {
         validate_name(name).map_err(|_| SystemError::InvalidName(name.into()))?;
         // Process Configuration
-        let debug = cfg.get_bool("debug").unwrap();
+        let debug = cfg.debug;
 
         // Until the logger has started, use println
         if debug {
@@ -475,8 +463,8 @@ impl ActorSystem {
         self.sys_events().tell(Publish { topic, msg: evt }, None);
     }
 
-    /// Returns the `Config` used by the system
-    pub fn config(&self) -> &Config {
+    /// Returns the `PicardConfig` used by the system
+    pub fn config(&self) -> &PicardConfig {
         &self.proto.config
     }
 
@@ -887,10 +875,10 @@ pub struct SystemSettings {
     pub msg_process_limit: u32,
 }
 
-impl From<&Config> for SystemSettings {
-    fn from(config: &Config) -> Self {
+impl From<&PicardConfig> for SystemSettings {
+    fn from(config: &PicardConfig) -> Self {
         SystemSettings {
-            msg_process_limit: config.get_int("mailbox.msg_process_limit").unwrap() as u32,
+            msg_process_limit: config.mailbox.msg_process_limit,
         }
     }
 }
@@ -900,72 +888,96 @@ struct ThreadPoolConfig {
     stack_size: usize,
 }
 
-impl From<&Config> for ThreadPoolConfig {
-    fn from(config: &Config) -> Self {
+impl From<&PicardConfig> for ThreadPoolConfig {
+    fn from(config: &PicardConfig) -> Self {
         ThreadPoolConfig {
-            pool_size: config.get_int("dispatcher.pool_size").unwrap() as usize,
-            stack_size: config.get_int("dispatcher.stack_size").unwrap() as usize,
+            pool_size: config.dispatcher.pool_size,
+            stack_size: config.dispatcher.stack_size,
         }
     }
 }
 
-fn validate_config(cfg: &Config) -> Result<(), SystemError> {
-    cfg.get_bool("debug")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    cfg.get_str("log.level")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    cfg.get_str("log.date_format")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    cfg.get_str("log.time_format")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
+/// Typed system configuration. Missing settings fall back to the defaults below.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct PicardConfig {
+    #[default(true)]
+    pub debug: bool,
+    pub log: LogConfig,
+    pub mailbox: MailboxConfig,
+    pub dispatcher: DispatcherConfig,
+    pub scheduler: SchedulerConfig,
+    pub cqrs: CqrsConfig,
+    /// Free-form application settings (the `[app]` section)
+    pub app: HashMap<String, config::Value>,
+}
 
-    let process_limit = cfg
-        .get_int("mailbox.msg_process_limit")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    if !(1..=i64::from(u32::MAX)).contains(&process_limit) {
-        return Err(SystemError::Configuration(
-            "`mailbox.msg_process_limit` must be between 1 and u32::MAX".into(),
-        ));
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct LogConfig {
+    #[default("debug".to_string())]
+    pub level: String,
+    /// Reserved: the default logger does not currently apply this format.
+    #[default("{date} {time} {level} [{module}] {body}".to_string())]
+    pub log_format: String,
+    #[default("%Y-%m-%d".to_string())]
+    pub date_format: String,
+    #[default("%H:%M:%S%:z".to_string())]
+    pub time_format: String,
+    pub filter: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct MailboxConfig {
+    #[default(1000)]
+    pub msg_process_limit: u32,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct DispatcherConfig {
+    #[default(num_cpus::get() * 2)]
+    pub pool_size: usize,
+    pub stack_size: usize,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct SchedulerConfig {
+    #[default(50)]
+    pub frequency_millis: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct CqrsConfig {
+    #[default(120)]
+    pub sleep_after_secs: u64,
+}
+
+fn validate_config(cfg: &PicardConfig) -> Result<(), SystemError> {
+    let invalid = |msg: &str| Err(SystemError::Configuration(ConfigError::Message(msg.into())));
+    if cfg.mailbox.msg_process_limit == 0 {
+        return invalid("`mailbox.msg_process_limit` must be between 1 and u32::MAX");
     }
-
-    let pool_size = cfg
-        .get_int("dispatcher.pool_size")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    if pool_size <= 0 || usize::try_from(pool_size).is_err() {
-        return Err(SystemError::Configuration(
-            "`dispatcher.pool_size` must be a positive usize".into(),
-        ));
+    if cfg.dispatcher.pool_size == 0 {
+        return invalid("`dispatcher.pool_size` must be a positive usize");
     }
-
-    let stack_size = cfg
-        .get_int("dispatcher.stack_size")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    if stack_size < 0 || usize::try_from(stack_size).is_err() {
-        return Err(SystemError::Configuration(
-            "`dispatcher.stack_size` must be a non-negative usize".into(),
-        ));
+    if cfg.scheduler.frequency_millis == 0 {
+        return invalid("`scheduler.frequency_millis` must be a positive u64");
     }
-
-    let frequency = cfg
-        .get_int("scheduler.frequency_millis")
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    if frequency <= 0 || u64::try_from(frequency).is_err() {
-        return Err(SystemError::Configuration(
-            "`scheduler.frequency_millis` must be a positive u64".into(),
-        ));
-    }
-
     Ok(())
 }
 
-fn default_exec(cfg: &Config) -> Result<ThreadPool, SystemError> {
+fn default_exec(cfg: &PicardConfig) -> Result<ThreadPool, SystemError> {
     let exec_cfg = ThreadPoolConfig::from(cfg);
     ThreadPoolBuilder::new()
         .pool_size(exec_cfg.pool_size)
         .stack_size(exec_cfg.stack_size)
         .name_prefix("pool-thread-#")
         .create()
-        .map_err(|err| SystemError::Configuration(err.to_string()))
+        .map_err(|err| err.into())
 }
 
 #[derive(Clone)]

@@ -228,8 +228,8 @@ fn repeating_timer_delivers_message_on_multiple_intervals() {
 
 #[test]
 fn invalid_custom_config_returns_an_error() {
-    let mut config = config::Config::new();
-    config.set("dispatcher.pool_size", 0).unwrap();
+    let mut config = PicardConfig::default();
+    config.dispatcher.pool_size = 0;
 
     assert!(matches!(
         ActorSystem::with_config("invalid-config", config),

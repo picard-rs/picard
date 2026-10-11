@@ -7,19 +7,26 @@ use std::{
     time::{Duration, Instant},
 };
 
-use config::Config;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use picard::actors::*;
 
 fn benchmark_system() -> ActorSystem {
-    let mut cfg = Config::default();
-    cfg.set_default("debug", false).unwrap();
-    cfg.set_default("log.level", "error").unwrap();
-    cfg.set_default("mailbox.msg_process_limit", 1000).unwrap();
-    cfg.set_default("dispatcher.pool_size", 4).unwrap();
-    cfg.set_default("dispatcher.stack_size", 0).unwrap();
-    cfg.set_default("scheduler.frequency_millis", 1).unwrap();
-    ActorSystem::with_config("actor-suite-bench", cfg).unwrap()
+    let config = PicardConfig {
+        debug: false,
+        log: LogConfig {
+            level: "error".into(),
+            ..Default::default()
+        },
+        dispatcher: DispatcherConfig {
+            pool_size: 4,
+            ..Default::default()
+        },
+        scheduler: SchedulerConfig {
+            frequency_millis: 1,
+        },
+        ..Default::default()
+    };
+    ActorSystem::with_config("actor-suite-bench", config).unwrap()
 }
 
 fn stop_actor<Msg: Message>(system: &ActorSystem, actor: &ActorRef<Msg>) {

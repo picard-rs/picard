@@ -16,49 +16,22 @@ use std::env;
 use std::fmt;
 use std::fmt::Debug;
 
-use config::{Config, File};
+use config::Config;
 
 use crate::actor::BasicActorRef;
-use crate::system::SystemError;
+use crate::system::{PicardConfig, SystemError};
 
-pub fn load_config() -> Result<Config, SystemError> {
-    let mut cfg = Config::new();
-    set_config_defaults(&mut cfg).map_err(SystemError::Configuration)?;
-
-    // load the system config
-    // picard.toml contains settings for anything related to the actor framework and its modules
-    let path = env::var("PICARD_CONF").unwrap_or_else(|_| "config/picard.toml".into());
-    cfg.merge(File::with_name(&path).required(false))
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-
-    // load the user application config
+pub fn load_config() -> Result<PicardConfig, SystemError> {
+    // picard.toml contains settings for the actor framework and its modules
+    let picard_path = env::var("PICARD_CONF").unwrap_or_else(|_| "config/picard".into());
     // app.toml or app.yaml contains settings specific to the user application
-    let path = env::var("APP_CONF").unwrap_or_else(|_| "config/app".into());
-    cfg.merge(File::with_name(&path).required(false))
-        .map_err(|err| SystemError::Configuration(err.to_string()))?;
-    Ok(cfg)
-}
+    let app_path = env::var("APP_CONF").unwrap_or_else(|_| "config/app".into());
 
-pub(crate) fn set_config_defaults(cfg: &mut Config) -> Result<(), String> {
-    cfg.set_default("debug", true)
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("log.level", "debug")
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("log.log_format", "{date} {time} {level} [{module}] {body}")
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("log.date_format", "%Y-%m-%d")
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("log.time_format", "%H:%M:%S%:z")
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("mailbox.msg_process_limit", 1000)
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("dispatcher.pool_size", (num_cpus::get() * 2) as i64)
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("dispatcher.stack_size", 0)
-        .map_err(|err| err.to_string())?;
-    cfg.set_default("scheduler.frequency_millis", 50)
-        .map_err(|err| err.to_string())?;
-    Ok(())
+    Ok(Config::builder()
+        .add_source(config::File::with_name(&picard_path).required(false))
+        .add_source(config::File::with_name(&app_path).required(false))
+        .build()?
+        .try_deserialize()?)
 }
 
 /// Wraps message and sender
@@ -144,7 +117,8 @@ impl Debug for AnyMessage {
 pub mod actors {
     pub use crate::actor::*;
     pub use crate::system::{
-        ActorSystem, Run, ScheduleId, SystemBuilder, SystemEvent, SystemMsg, Timer,
+        ActorSystem, DispatcherConfig, LogConfig, PicardConfig, Run, ScheduleId, SchedulerConfig,
+        SystemBuilder, SystemEvent, SystemMsg, Timer,
     };
     pub use crate::{AnyMessage, Message};
 }

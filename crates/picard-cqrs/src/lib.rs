@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use config::Config;
 use log::{error, trace};
 use picard::actors::*;
 
@@ -190,10 +189,10 @@ pub struct EntityActorConfig {
     sleep_after_secs: u64,
 }
 
-impl From<&Config> for EntityActorConfig {
-    fn from(config: &Config) -> Self {
+impl From<&PicardConfig> for EntityActorConfig {
+    fn from(config: &PicardConfig) -> Self {
         EntityActorConfig {
-            sleep_after_secs: config.get_int("cqrs.sleep_after_secs").unwrap() as u64,
+            sleep_after_secs: config.cqrs.sleep_after_secs,
         }
     }
 }

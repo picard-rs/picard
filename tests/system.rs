@@ -86,7 +86,10 @@ fn system_futures_panic() {
 fn system_load_app_config() {
     let sys = ActorSystem::new().unwrap();
 
-    assert_eq!(sys.config().get_int("app.some_setting").unwrap() as i64, 1);
+    assert_eq!(
+        sys.config().app["some_setting"].clone().into_int().unwrap(),
+        1
+    );
 }
 
 #[test]

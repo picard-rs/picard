@@ -7,7 +7,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use config::Config;
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::executor::block_on;
 use picard::actors::*;
@@ -36,17 +35,18 @@ impl Actor for BenchActor {
 }
 
 fn benchmark_system() -> ActorSystem {
-    let mut cfg = Config::default();
-    cfg.set_default("debug", false).unwrap();
-    cfg.set_default("log.level", "error").unwrap();
-    cfg.set_default("log.log_format", "{date} {time} {level} [{module}] {body}")
-        .unwrap();
-    cfg.set_default("log.date_format", "%Y-%m-%d").unwrap();
-    cfg.set_default("log.time_format", "%H:%M:%S%:z").unwrap();
-    cfg.set_default("mailbox.msg_process_limit", 1000).unwrap();
-    cfg.set_default("dispatcher.pool_size", 2).unwrap();
-    cfg.set_default("dispatcher.stack_size", 0).unwrap();
-    cfg.set_default("scheduler.frequency_millis", 50).unwrap();
+    let cfg = PicardConfig {
+        debug: false,
+        log: LogConfig {
+            level: "error".into(),
+            ..Default::default()
+        },
+        dispatcher: DispatcherConfig {
+            pool_size: 2,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     ActorSystem::with_config("bench", cfg).unwrap()
 }

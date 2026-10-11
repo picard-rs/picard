@@ -2,8 +2,7 @@ use crate::actor::{
     Actor, ActorFactoryArgs, ActorRef, All, BasicActorRef, ChannelMsg, Context, DeadLetter,
     Subscribe, Tell,
 };
-use crate::system::LoggingSystem;
-use config::Config;
+use crate::system::{LoggingSystem, PicardConfig};
 use slog::{Drain, Level, Logger, Never, OwnedKVList, Record, info, o};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,26 +17,18 @@ pub struct LoggerConfig {
     level: Level,
 }
 
-impl From<&Config> for LoggerConfig {
-    fn from(config: &Config) -> Self {
+impl From<&PicardConfig> for LoggerConfig {
+    fn from(config: &PicardConfig) -> Self {
         LoggerConfig {
-            time_fmt: config.get_str("log.time_format").unwrap(),
-            date_fmt: config.get_str("log.date_format").unwrap(),
-            filter: config
-                .get_array("log.filter")
-                .unwrap_or_default()
-                .into_iter()
-                .map(|e| e.to_string())
-                .collect(),
-            level: config
-                .get_str("log.level")
-                .map(|l| Level::from_str(&l).unwrap_or(Level::Info))
-                .unwrap_or(Level::Info),
+            time_fmt: config.log.time_format.clone(),
+            date_fmt: config.log.date_format.clone(),
+            filter: config.log.filter.clone(),
+            level: Level::from_str(&config.log.level).unwrap_or(Level::Info),
         }
     }
 }
 
-pub(crate) fn default_log(cfg: &Config) -> LoggingSystem {
+pub(crate) fn default_log(cfg: &PicardConfig) -> LoggingSystem {
     let cfg = LoggerConfig::from(cfg);
 
     let drain = DefaultConsoleLogger::new(cfg.clone())

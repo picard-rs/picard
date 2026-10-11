@@ -5,9 +5,9 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use config::Config;
 use uuid::Uuid;
 
+use crate::system::PicardConfig;
 use crate::{
     AnyMessage, Message,
     actor::{ActorRef, BasicActorRef, Sender},
@@ -100,7 +100,7 @@ pub struct BasicTimer {
 }
 
 impl BasicTimer {
-    pub fn start(cfg: &Config) -> TimerRef {
+    pub fn start(cfg: &PicardConfig) -> TimerRef {
         let cfg = BasicTimerConfig::from(cfg);
 
         let mut process = BasicTimer {
@@ -189,10 +189,10 @@ struct BasicTimerConfig {
     frequency_millis: u64,
 }
 
-impl From<&Config> for BasicTimerConfig {
-    fn from(config: &Config) -> Self {
+impl From<&PicardConfig> for BasicTimerConfig {
+    fn from(config: &PicardConfig) -> Self {
         BasicTimerConfig {
-            frequency_millis: config.get_int("scheduler.frequency_millis").unwrap() as u64,
+            frequency_millis: config.scheduler.frequency_millis,
         }
     }
 }

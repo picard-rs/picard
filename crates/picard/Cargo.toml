@@ -11,8 +11,8 @@ license-file.workspace = true
 
 [dependencies]
 picard-macros.workspace = true
+config.workspace = true
 chrono = "0.4"
-config = "0.10.1"
 futures = { version = "0.3.4", features = ["thread-pool"] }
 rand = "0.7"
 regex = "1"
@@ -23,6 +23,9 @@ slog-stdlog = "4.0"
 slog-scope = "4.3.0"
 num_cpus = "1.13.0"
 dashmap = "3"
+thiserror = "2.0.21"
+serde = { version = "1.0.229", features = ["derive"] }
+better_default = "1.0.5"
 
 
 [dev-dependencies]

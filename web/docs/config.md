@@ -7,14 +7,14 @@ Picard makes configuration straightforward by using two config files:
 - `picard.toml` can be modified to change the behavior of Picard and various modules
 - `app.*`, such as `app.toml` or `app.yml` for application specific settings
 
-Configuration is based on the `Config` crate meaning that any format supported by that crate can be used for application setting.
+Configuration is loaded with the `config` crate, so any format it supports can be used.
 
-When the system starts `picard.toml` is loaded and if an application config file exists it will be merged into a single `Config` instance. This keeps settings separate for the purposes of maintenance and CI/CD, but makes it uniformly available at runtime.
+When the system starts `picard.toml` is loaded and if an application config file exists it will be merged and deserialized into a single typed `PicardConfig`. This keeps settings separate for the purposes of maintenance and CI/CD, but makes it uniformly available at runtime.
 
-The `Config` instance is accessible via the `ActorSystem` instance, for example:
+The `PicardConfig` is accessible via the `ActorSystem` instance. Framework settings are typed fields (e.g. `sys.config().mailbox.msg_process_limit`), and application settings from the `[app]` section are in `app`:
 
 ```rust
-let myval = sys.config().get_str("app.myval").unwrap();
+let myval = sys.config().app["myval"].clone().into_string().unwrap();
 ```
 
 This expects the following entry in `app.*`:
@@ -39,11 +39,11 @@ Configuration file paths can be overridden using environment variables:
 
 ### Default Values
 
-Default values are discouraged. If a setting is missing from a config file it's better to let `.unwrap()` panic than to use a hidden default settings in code. This makes it clear as to what settings are being used and there is no unexpected behavior at runtime. It's better to not run at all than run with bad, possibly dangerous settings.
+Framework settings missing from the config files fall back to the defaults of `PicardConfig`. Invalid values (e.g. a zero pool size) are rejected when the system starts. Use `ActorSystem::with_config` with a `PicardConfig` to bypass file loading.
 
 ### Using .config()
 
-It is highly encouraged in terms of function signatures to not pass around instances of `Config`. Not only is it slower but it makes understanding what a function does difficult. It is always better to extract values from configuration early on in your application and then pass those to functions. If you have many settings to pass to a function a dedicated settings struct could be used.
+It is highly encouraged in terms of function signatures to not pass around instances of `PicardConfig`. Not only is it slower but it makes understanding what a function does difficult. It is always better to extract values from configuration early on in your application and then pass those to functions. If you have many settings to pass to a function a dedicated settings struct could be used.
 
 ### Module Settings
 
