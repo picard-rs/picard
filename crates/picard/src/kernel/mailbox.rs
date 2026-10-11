@@ -98,7 +98,6 @@ where
     }
 }
 
-
 #[derive(Clone)]
 pub struct Mailbox<Msg: Message> {
     inner: Arc<MailboxInner<Msg>>,

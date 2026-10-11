@@ -22,9 +22,9 @@ impl<Msg: Message> Clone for QueueWriter<Msg> {
 
 impl<Msg: Message> QueueWriter<Msg> {
     pub fn try_enqueue(&self, msg: Envelope<Msg>) -> EnqueueResult<Msg> {
-        self.tx
-            .send(msg)
-            .map_err(|e| EnqueueError { msg: e.into_inner() })
+        self.tx.send(msg).map_err(|e| EnqueueError {
+            msg: e.into_inner(),
+        })
     }
 }
 

@@ -123,13 +123,7 @@ fn root(sys: &ActorSystem) -> BasicActorRef {
     // independently without an actor being created.
     // The big bang cell has no kernel: it is just a channel to nowhere.
 
-    let bb_cell = ActorCell::new(
-        uri.clone(),
-        None,
-        sys,
-        Arc::new(sender),
-        sys_sender,
-    );
+    let bb_cell = ActorCell::new(uri.clone(), None, sys, Arc::new(sender), sys_sender);
 
     let bigbang = BasicActorRef::new(bb_cell);
 
