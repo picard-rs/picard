@@ -33,3 +33,7 @@ criterion = "0.5"
 [[bench]]
 name = "runtime"
 harness = false
+
+[[bench]]
+name = "actor_suite"
+harness = false

@@ -87,6 +87,18 @@ cargo bench -p picard --bench runtime
 The benchmark target measures typed and untyped message throughput (including
 mailbox processing), actor round-trip latency, and actor creation.
 
+The Picard implementations of the public actor benchmark workloads are also
+available as a Criterion suite:
+
+```bash
+cargo bench -p picard --bench actor_suite
+```
+
+This suite covers binary-tree actor creation, multi-sender mailbox throughput,
+parallel Mandelbrot rows, message matching, a mixed factorization/ring workload,
+and one-shot scheduling. The distributed benchmark is not included because
+Picard does not currently provide remote actors.
+
 ## Actor Demo
 
 Run the actor efficiency demo in release mode for a more representative
