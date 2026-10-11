@@ -15,6 +15,14 @@ use config::Config;
 use crate::actor::BasicActorRef;
 use crate::system::{PicardConfig, SystemError};
 
+/// Load the configuration from `config/picard` and `config/app`, or from the
+/// paths in the `PICARD_CONF` and `APP_CONF` environment variables. Missing
+/// files are skipped.
+///
+/// # Errors
+///
+/// Returns [`SystemError::Configuration`] if a file cannot be parsed or
+/// does not match [`PicardConfig`].
 pub fn load_config() -> Result<PicardConfig, SystemError> {
     // picard.toml contains settings for the actor framework and its modules
     let picard_path = env::var("PICARD_CONF").unwrap_or_else(|_| "config/picard".into());
@@ -80,6 +88,13 @@ impl AnyMessage {
         }
     }
 
+    /// Take the message out as a `T`. A repeatable message is cloned and stays
+    /// available.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DowncastAnyMessageError`] if the message was already taken
+    /// or is not a `T`.
     pub fn take<T>(&mut self) -> Result<T, DowncastAnyMessageError>
     where
         T: Any + Message,

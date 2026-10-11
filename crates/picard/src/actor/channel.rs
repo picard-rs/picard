@@ -353,6 +353,12 @@ impl From<SysTopic> for Topic {
     }
 }
 
+/// Create a channel actor named `name`.
+///
+/// # Errors
+///
+/// Returns a [`CreateError`] if the channel actor cannot be created, for
+/// example because `name` is invalid or already in use.
 pub fn channel<Msg>(name: &str, fact: &impl ActorRefFactory) -> Result<ChannelRef<Msg>, CreateError>
 where
     Msg: Message + Clone,

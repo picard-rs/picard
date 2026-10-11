@@ -23,6 +23,11 @@ pub struct Sim {
 
 impl Sim {
     /// Starts the actor system with the default districts and `vehicles` vehicles.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error message if the actor system or one of the top-level
+    /// actors cannot be created.
     pub fn start(vehicles: usize) -> Result<Self, String> {
         let mut config = PicardConfig::default();
         config.log.level = "warn".to_string();

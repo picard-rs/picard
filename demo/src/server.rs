@@ -35,6 +35,11 @@ struct AppState {
 }
 
 /// Runs the demo server until Ctrl-C.
+///
+/// # Errors
+///
+/// Returns an error message if the simulation fails to start, `addr`
+/// cannot be bound, or the server fails.
 pub async fn serve(addr: SocketAddr, vehicles: usize) -> Result<(), String> {
     let sim = Sim::start(vehicles)?;
     let (tx, frames) = watch::channel::<Arc<str>>(Arc::from("{}"));

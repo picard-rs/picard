@@ -51,6 +51,10 @@ impl<A: Actor> Clone for Dock<A> {
 
 /// Starts the kernel task that drives an actor's lifecycle and mailbox.
 ///
+/// # Errors
+///
+/// Returns [`CreateError::Panicked`] if the actor factory panics.
+///
 /// # Panics
 ///
 /// Panics if the kernel task cannot be spawned on the system's executor.

@@ -205,6 +205,11 @@ impl BasicActorRef {
     /// Send a message to this actor
     ///
     /// Returns a result. If the message type is not supported Error is returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AnyEnqueueError` if the actor does not accept `Msg` or its
+    /// mailbox no longer accepts messages.
     pub fn try_tell<Msg>(
         &self,
         msg: Msg,
@@ -216,6 +221,12 @@ impl BasicActorRef {
         self.try_tell_any(&mut AnyMessage::new(msg), sender)
     }
 
+    /// Send a type-erased message to this actor.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AnyEnqueueError` if the message type does not match the
+    /// actor's message type or its mailbox no longer accepts messages.
     pub fn try_tell_any(
         &self,
         msg: &mut AnyMessage,
@@ -562,7 +573,19 @@ impl<Msg: Message> PartialEq for ActorRef<Msg> {
 /// `pre_start` and `post_start` may not have run when this method returns.
 /// Failures in those hooks are handled by the actor runtime and are not
 /// reported as errors from actor creation.
+///
+/// # Errors
+///
+/// The `actor_of*` methods return [`CreateError::InvalidName`] if `name` is
+/// not a valid actor name, [`CreateError::AlreadyExists`] if an actor with
+/// the same path exists, [`CreateError::Panicked`] if the actor factory
+/// panics, and [`CreateError::System`] if the actor system cannot start it.
 pub trait ActorRefFactory {
+    /// Create an actor from `props`.
+    ///
+    /// # Errors
+    ///
+    /// See [`ActorRefFactory`].
     fn actor_of_props<A>(
         &self,
         name: &str,
@@ -571,10 +594,20 @@ pub trait ActorRefFactory {
     where
         A: Actor;
 
+    /// Create an actor using its [`ActorFactory`] implementation.
+    ///
+    /// # Errors
+    ///
+    /// See [`ActorRefFactory`].
     fn actor_of<A>(&self, name: &str) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
         A: ActorFactory + Actor;
 
+    /// Create an actor using its [`ActorFactoryArgs`] implementation.
+    ///
+    /// # Errors
+    ///
+    /// See [`ActorRefFactory`].
     fn actor_of_args<A, Args>(
         &self,
         name: &str,
@@ -589,6 +622,12 @@ pub trait ActorRefFactory {
 
 /// Produces `ActorRef`s under the `temp` guardian actor.
 pub trait TmpActorRefFactory {
+    /// Create a temporary actor from `props`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CreateError::Panicked`] if the actor factory panics, or
+    /// [`CreateError::System`] if the actor system cannot start the actor.
     fn tmp_actor_of_props<A>(
         &self,
         props: BoxActorProd<A>,
@@ -596,10 +635,20 @@ pub trait TmpActorRefFactory {
     where
         A: Actor;
 
+    /// Create a temporary actor using its [`ActorFactory`] implementation.
+    ///
+    /// # Errors
+    ///
+    /// See [`TmpActorRefFactory::tmp_actor_of_props`].
     fn tmp_actor_of<A>(&self) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
         A: ActorFactory + Actor;
 
+    /// Create a temporary actor using its [`ActorFactoryArgs`] implementation.
+    ///
+    /// # Errors
+    ///
+    /// See [`TmpActorRefFactory::tmp_actor_of_props`].
     fn tmp_actor_of_args<A, Args>(
         &self,
         args: Args,

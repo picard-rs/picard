@@ -195,6 +195,14 @@ impl SystemBuilder {
         Self::default()
     }
 
+    /// Create the actor system, loading the configuration with
+    /// [`load_config`] if none was given.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SystemError`] if the configuration cannot be loaded, the
+    /// name is invalid, the executor cannot be created or a system actor
+    /// fails to start.
     pub fn create(self) -> Result<ActorSystem, SystemError> {
         let name = self.name.unwrap_or_else(|| "picard".to_string());
         let cfg = match self.cfg {
@@ -293,6 +301,12 @@ impl ActorSystem {
     /// Create a new `ActorSystem` instance
     ///
     /// Requires a type that implements the `Model` trait.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SystemError`] if the configuration cannot be loaded or is
+    /// invalid, the executor cannot be created or a system actor fails to
+    /// start.
     pub fn new() -> Result<Self, SystemError> {
         let cfg = load_config()?;
         validate_config(&cfg)?;
@@ -305,6 +319,11 @@ impl ActorSystem {
     /// Create a new `ActorSystem` instance with provided name
     ///
     /// Requires a type that implements the `Model` trait.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`ActorSystem::new`], and also [`SystemError::InvalidName`]
+    /// if `name` is not a valid system name.
     pub fn with_name(name: &str) -> Result<Self, SystemError> {
         let cfg = load_config()?;
         validate_config(&cfg)?;
@@ -315,6 +334,12 @@ impl ActorSystem {
     }
 
     /// Create a new `ActorSystem` instance bypassing default config behavior
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SystemError`] if `cfg` is invalid, `name` is not a valid
+    /// system name, the executor cannot be created or a system actor fails
+    /// to start.
     pub fn with_config(name: &str, cfg: PicardConfig) -> Result<Self, SystemError> {
         validate_config(&cfg)?;
         let exec = default_exec(&cfg)?;
@@ -542,6 +567,12 @@ impl ActorSystem {
     }
 
     /// Create an actor under the system root
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CreateError::InvalidName`] if `name` is not a valid actor
+    /// name, [`CreateError::AlreadyExists`] if the path is taken, or
+    /// [`CreateError::Panicked`] if the actor factory panics.
     pub fn sys_actor_of_props<A>(
         &self,
         name: &str,
@@ -554,6 +585,12 @@ impl ActorSystem {
             .create_actor(props, name, self.sys_root(), self)
     }
 
+    /// Create an actor under the system root using its [`ActorFactory`]
+    /// implementation.
+    ///
+    /// # Errors
+    ///
+    /// See [`ActorSystem::sys_actor_of_props`].
     pub fn sys_actor_of<A>(&self, name: &str) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
         A: ActorFactory,
@@ -562,6 +599,12 @@ impl ActorSystem {
             .create_actor(Props::produce::<A>(), name, self.sys_root(), self)
     }
 
+    /// Create an actor under the system root using its [`ActorFactoryArgs`]
+    /// implementation.
+    ///
+    /// # Errors
+    ///
+    /// See [`ActorSystem::sys_actor_of_props`].
     pub fn sys_actor_of_args<A, Args>(
         &self,
         name: &str,
@@ -740,6 +783,11 @@ impl ActorSelectionFactory for ActorSystem {
 // futures::task::Spawn::spawn requires &mut self so
 // we'll create a wrapper trait that requires only &self.
 pub trait Run {
+    /// Spawn `future` on the executor and return a handle to its output.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpawnError`] if the executor is shut down.
     fn run<Fut>(&self, future: Fut) -> Result<RemoteHandle<<Fut as Future>::Output>, SpawnError>
     where
         Fut: Future + Send + 'static,

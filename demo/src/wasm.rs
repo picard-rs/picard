@@ -19,6 +19,10 @@ pub struct Demo {
 #[wasm_bindgen]
 impl Demo {
     /// Starts the actor system with `vehicles` vehicles.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `JsError` if the simulation fails to start.
     #[wasm_bindgen(constructor)]
     pub fn new(vehicles: usize) -> Result<Demo, JsError> {
         std::panic::set_hook(Box::new(|info| {

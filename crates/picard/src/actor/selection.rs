@@ -38,6 +38,11 @@ pub struct ActorSelection {
 }
 
 impl ActorSelection {
+    /// Create a selection of actors matching `path`, relative to `anchor`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidPath` if `path` contains invalid characters.
     pub fn new(
         anchor: BasicActorRef,
         // dl: &BasicActorRef,
@@ -64,6 +69,14 @@ impl ActorSelection {
         })
     }
 
+    /// Send `msg` to every actor in the selection and return how many
+    /// mailboxes accepted it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelectionSendError::NoRecipients`] if the path matches no
+    /// actors, or [`SelectionSendError::DeliveryFailed`] if one or more
+    /// recipients rejected the message.
     pub fn try_tell<Msg>(
         &self,
         msg: Msg,
@@ -166,5 +179,10 @@ enum Selection {
 }
 
 pub trait ActorSelectionFactory {
+    /// Select actors by `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidPath` if `path` contains invalid characters.
     fn select(&self, path: &str) -> Result<ActorSelection, InvalidPath>;
 }

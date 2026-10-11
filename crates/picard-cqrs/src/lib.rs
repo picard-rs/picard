@@ -41,6 +41,13 @@ where
 pub struct Entity;
 
 impl Entity {
+    /// Create the entity manager actor `entity-{name}`, which creates entity
+    /// instances with `instance_fact` on demand.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`CreateError`] if the manager actor cannot be created, for
+    /// example because `name` is invalid or already in use.
     #[allow(clippy::new_ret_no_self)]
     pub fn new<Pro>(
         sys: &ActorSystem,
