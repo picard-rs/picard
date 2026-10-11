@@ -1,15 +1,14 @@
 use std::{
+    collections::HashMap,
     fmt,
-    ops::Deref,
     sync::{
-        Arc,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 
 use chrono::prelude::*;
-use dashmap::DashMap;
 use futures::{Future, future::RemoteHandle, task::SpawnError};
 use uuid::Uuid;
 
@@ -38,14 +37,13 @@ pub struct ActorCell {
     inner: Arc<ActorCellInner>,
 }
 
-#[derive(Clone)]
 struct ActorCellInner {
     uri: ActorUri,
     parent: Option<BasicActorRef>,
     children: Children,
-    is_terminating: Arc<AtomicBool>,
-    is_restarting: Arc<AtomicBool>,
-    kernel: Option<KernelRef>,
+    is_terminating: AtomicBool,
+    is_restarting: AtomicBool,
+    kernel: OnceLock<KernelRef>,
     system: ActorSystem,
     mailbox: Arc<dyn AnySender>,
     sys_mailbox: MailboxSender<SystemMsg>,
@@ -65,9 +63,9 @@ impl ActorCell {
                 uri,
                 parent,
                 children: Children::new(),
-                is_terminating: Arc::new(AtomicBool::new(false)),
-                is_restarting: Arc::new(AtomicBool::new(false)),
-                kernel: None,
+                is_terminating: AtomicBool::new(false),
+                is_restarting: AtomicBool::new(false),
+                kernel: OnceLock::new(),
                 system: system.clone(),
                 mailbox,
                 sys_mailbox,
@@ -76,18 +74,13 @@ impl ActorCell {
     }
 
     pub(crate) fn init(self, kernel: &KernelRef) -> Self {
-        let inner = ActorCellInner {
-            kernel: Some(kernel.clone()),
-            ..self.inner.deref().clone()
-        };
-
-        Self {
-            inner: Arc::new(inner),
-        }
+        // Every cell handed a kernel is given the same one, so a repeated init is a no-op.
+        let _ = self.inner.kernel.set(kernel.clone());
+        self
     }
 
     pub(crate) fn kernel(&self) -> &KernelRef {
-        self.inner.kernel.as_ref().unwrap()
+        self.inner.kernel.get().unwrap()
     }
 
     pub(crate) fn myself(&self) -> BasicActorRef {
@@ -141,7 +134,7 @@ impl ActorCell {
     }
 
     pub(crate) fn is_child(&self, actor: &BasicActorRef) -> bool {
-        self.inner.children.iter().any(|child| child == *actor)
+        self.inner.children.contains(actor)
     }
 
     pub(crate) fn stop(&self, actor: &BasicActorRef) {
@@ -317,9 +310,9 @@ where
                 uri,
                 parent,
                 children: Children::new(),
-                is_terminating: Arc::new(AtomicBool::new(false)),
-                is_restarting: Arc::new(AtomicBool::new(false)),
-                kernel: None,
+                is_terminating: AtomicBool::new(false),
+                is_restarting: AtomicBool::new(false),
+                kernel: OnceLock::new(),
                 system: system.clone(),
                 mailbox: any_mailbox,
                 sys_mailbox,
@@ -630,31 +623,46 @@ where
     }
 }
 
-#[derive(Clone)]
+/// The children of an actor, keyed by name.
+///
+/// A plain `Mutex<HashMap>` is used because it allocates nothing until the first child is
+/// added, unlike a sharded map, which allocates all of its shards for every actor.
+#[derive(Default)]
 pub struct Children {
-    actors: Arc<DashMap<String, BasicActorRef>>,
+    actors: Mutex<HashMap<String, BasicActorRef>>,
 }
 
 impl Children {
     pub fn new() -> Self {
-        Self {
-            actors: Arc::new(DashMap::new()),
-        }
+        Self::default()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, BasicActorRef>> {
+        self.actors.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn add(&self, actor: BasicActorRef) {
-        self.actors.insert(actor.name().to_string(), actor);
+        self.lock().insert(actor.name().to_string(), actor);
     }
 
     pub fn remove(&self, actor: &BasicActorRef) {
-        self.actors.remove(actor.name());
+        self.lock().remove(actor.name());
     }
 
     pub fn len(&self) -> usize {
-        self.actors.len()
+        self.lock().len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = BasicActorRef> + '_ {
-        self.actors.iter().map(|e| e.value().clone())
+    pub fn contains(&self, actor: &BasicActorRef) -> bool {
+        self.lock().values().any(|child| child == actor)
+    }
+
+    /// Returns a snapshot, so the lock is not held while the caller messages the children.
+    pub fn iter(&self) -> std::vec::IntoIter<BasicActorRef> {
+        self.lock()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 }
