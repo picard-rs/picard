@@ -7,7 +7,10 @@ use crate::system::LoggingSystem;
 use crate::{
     actor::actor_cell::{ActorCell, ExtendedCell},
     actor::actor_ref::SystemTell,
-    actor::*,
+    actor::{
+        Actor, ActorFactoryArgs, ActorPath, ActorRef, ActorReference, ActorUri, BasicActorRef,
+        BoxActorProd, Context, CreateError, Props,
+    },
     kernel::kernel,
     kernel::mailbox::mailbox,
     system::{ActorSystem, SysActors, SystemMsg},
@@ -29,7 +32,7 @@ impl Provider {
             paths: DashSet::new(),
         };
 
-        Provider {
+        Self {
             inner: Arc::new(inner),
         }
     }
@@ -184,7 +187,7 @@ struct Guardian {
 
 impl ActorFactoryArgs<(String, LoggingSystem)> for Guardian {
     fn create_args((name, log): (String, LoggingSystem)) -> Self {
-        Guardian { name, log }
+        Self { name, log }
     }
 }
 

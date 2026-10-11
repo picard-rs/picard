@@ -24,7 +24,10 @@ use crate::{
     Message,
     actor::actor_cell::ExtendedCell,
     actor::actor_ref::SystemTell,
-    actor::*,
+    actor::{
+        Actor, ActorProducer, ActorRef, ActorReference, BasicActorRef, BoxActorProd, Context,
+        CreateError,
+    },
     kernel::{
         kernel_ref::KernelRef,
         mailbox::{Mailbox, flush_to_deadletters, run_mailbox},
@@ -38,8 +41,8 @@ pub struct Dock<A: Actor> {
 }
 
 impl<A: Actor> Clone for Dock<A> {
-    fn clone(&self) -> Dock<A> {
-        Dock {
+    fn clone(&self) -> Self {
+        Self {
             actor: self.actor.clone(),
             cell: self.cell.clone(),
         }

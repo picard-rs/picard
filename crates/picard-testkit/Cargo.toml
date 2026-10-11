@@ -8,5 +8,8 @@ edition.workspace = true
 repository.workspace = true
 license-file.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono.workspace = true

@@ -42,7 +42,7 @@ pub struct MsgError<T> {
 
 impl<T> MsgError<T> {
     pub fn new(msg: T) -> Self {
-        MsgError { msg }
+        Self { msg }
     }
 }
 
@@ -65,7 +65,7 @@ pub struct TryMsgError<T> {
 
 impl<T> TryMsgError<T> {
     pub fn new(msg: T) -> Self {
-        TryMsgError { msg }
+        Self { msg }
     }
 }
 
@@ -98,20 +98,18 @@ impl fmt::Display for CreateError {
             }
             Self::System => f.write_str("Failed to create actor. Cause: System failure"),
             Self::InvalidName(ref name) => f.write_str(&format!(
-                "Failed to create actor. Cause: Invalid actor name ({})",
-                name
+                "Failed to create actor. Cause: Invalid actor name ({name})"
             )),
             Self::AlreadyExists(ref path) => f.write_str(&format!(
-                "Failed to create actor. Cause: An actor at the same path already exists ({})",
-                path
+                "Failed to create actor. Cause: An actor at the same path already exists ({path})"
             )),
         }
     }
 }
 
 impl From<InvalidName> for CreateError {
-    fn from(err: InvalidName) -> CreateError {
-        CreateError::InvalidName(err.name)
+    fn from(err: InvalidName) -> Self {
+        Self::InvalidName(err.name)
     }
 }
 
@@ -171,19 +169,19 @@ pub trait Actor: Send + 'static {
     fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender);
 }
 
-impl<A: Actor + ?Sized> Actor for Box<A> {
-    type Msg = A::Msg;
+impl<T: Actor + ?Sized> Actor for Box<T> {
+    type Msg = T::Msg;
 
     fn pre_start(&mut self, ctx: &Context<Self::Msg>) {
         (**self).pre_start(ctx);
     }
 
     fn post_start(&mut self, ctx: &Context<Self::Msg>) {
-        (**self).post_start(ctx)
+        (**self).post_start(ctx);
     }
 
     fn post_stop(&mut self) {
-        (**self).post_stop()
+        (**self).post_stop();
     }
 
     fn sys_recv(
@@ -192,7 +190,7 @@ impl<A: Actor + ?Sized> Actor for Box<A> {
         msg: SystemMsg,
         sender: Option<BasicActorRef>,
     ) {
-        (**self).sys_recv(ctx, msg, sender)
+        (**self).sys_recv(ctx, msg, sender);
     }
 
     fn supervisor_strategy(&self) -> Strategy {
@@ -200,7 +198,7 @@ impl<A: Actor + ?Sized> Actor for Box<A> {
     }
 
     fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
-        (**self).recv(ctx, msg, sender)
+        (**self).recv(ctx, msg, sender);
     }
 }
 

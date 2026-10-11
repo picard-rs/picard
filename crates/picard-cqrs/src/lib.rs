@@ -1,9 +1,13 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use log::{error, trace};
-use picard::actors::*;
+use picard::actors::{
+    Actor, ActorRef, ActorRefFactory, ActorSystem, BoxActorProd, Context, CreateError, Message,
+    PicardConfig, Props, Sender, Tell, Timer,
+};
 
 /// Messages understood by the entity manager actor.
 #[derive(Clone, Debug)]
@@ -49,7 +53,7 @@ impl Entity {
     {
         let conf = conf.unwrap_or_else(|| EntityActorConfig::from(sys.config()));
         let props = EntityActor::props(name, instance_fact, conf);
-        let actor = sys.actor_of_props(&format!("entity-{}", name), props)?;
+        let actor = sys.actor_of_props(&format!("entity-{name}"), props)?;
 
         Ok(actor)
     }
@@ -71,7 +75,7 @@ where
     }
 
     fn actor((name, instance_fact, conf): (String, Pro, EntityActorConfig)) -> Self {
-        EntityActor {
+        Self {
             name,
             props: instance_fact,
             instances: HashMap::new(),
@@ -134,12 +138,12 @@ where
             .partition(|(_, instance)| threshhold > instance.last_used);
 
         // stop instances
-        for instance in stop.into_iter() {
+        for instance in stop {
             ctx.stop(&instance.1.actor);
         }
 
         // keep instances that are not due to sleep
-        for instance in keep.into_iter() {
+        for instance in keep {
             self.instances.insert(instance.0, instance.1);
         }
 
@@ -174,7 +178,7 @@ where
 fn entity_actor_name(id: &str) -> String {
     let mut name = String::from("entity-");
     for byte in id.as_bytes() {
-        name.push_str(&format!("{:02x}", byte));
+        write!(name, "{byte:02x}").expect("writing to a String cannot fail");
     }
     name
 }
@@ -191,7 +195,7 @@ pub struct EntityActorConfig {
 
 impl From<&PicardConfig> for EntityActorConfig {
     fn from(config: &PicardConfig) -> Self {
-        EntityActorConfig {
+        Self {
             sleep_after_secs: config.cqrs.sleep_after_secs,
         }
     }
@@ -225,7 +229,7 @@ mod tests {
 
     impl BankAccountActor {
         pub fn new(id: String) -> Self {
-            BankAccountActor { id, state: None }
+            Self { id, state: None }
         }
     }
 
@@ -275,13 +279,13 @@ mod tests {
         let em = Entity::new(&system, BankAccountActorFact, "BankAccont", None).unwrap();
 
         let ids = ["12345678", "87654321", "65555555"];
-        for id in ids.iter() {
+        for id in &ids {
             em.tell(
                 EntityMsg::Cmd(id.to_string(), TestMsg::CreateAccountCmd("Name".into())),
                 None,
             );
         }
-        for id in ids.iter() {
+        for id in &ids {
             for _ in 0..3 {
                 em.tell(
                     EntityMsg::Cmd(id.to_string(), TestMsg::AddAmountCmd(100)),

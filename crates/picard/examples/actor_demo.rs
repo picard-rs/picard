@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use picard::actors::*;
+use picard::actors::{Actor, ActorRefFactory, ActorSystem, Context, Sender, Tell};
 
 const ITEMS: u64 = 100_000;
 const WORK_PER_ITEM: u32 = 100;
@@ -46,8 +46,7 @@ fn calculate(start: u64, end: u64) -> u64 {
 
 fn main() {
     let workers = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
+        .map_or(1, usize::from)
         .min(MAX_WORKERS)
         .min(ITEMS as usize);
     let system = ActorSystem::with_name("efficiency-demo").expect("start actor system");
@@ -98,5 +97,5 @@ fn main() {
 }
 
 fn format_duration(duration: Duration) -> String {
-    format!("{:.2?}", duration)
+    format!("{duration:.2?}")
 }

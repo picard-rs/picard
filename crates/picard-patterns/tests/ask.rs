@@ -39,8 +39,6 @@ fn stress_test() {
         FooResult,
     }
 
-    let system: ActorSystem = ActorSystem::new().unwrap();
-
     #[derive(Default)]
     struct FooActor;
 
@@ -55,6 +53,7 @@ fn stress_test() {
         }
     }
 
+    let system: ActorSystem = ActorSystem::new().unwrap();
     let actor = system.actor_of::<FooActor>("foo").unwrap();
 
     for _i in 1..10_000 {

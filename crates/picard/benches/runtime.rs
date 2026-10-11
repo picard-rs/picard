@@ -9,7 +9,10 @@ use std::{
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::executor::block_on;
-use picard::actors::*;
+use picard::actors::{
+    Actor, ActorRef, ActorRefFactory, ActorReference, ActorSystem, BasicActorRef, Context,
+    DispatcherConfig, LogConfig, PicardConfig, Sender, Tell,
+};
 
 #[derive(Clone, Debug)]
 enum BenchMessage {

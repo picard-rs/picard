@@ -37,7 +37,7 @@ impl Parse for MsgTypes {
     fn parse(input: ParseStream) -> Result<Self> {
         let vars = Punctuated::<TypePath, Comma>::parse_terminated(input)?;
 
-        Ok(MsgTypes {
+        Ok(Self {
             types: vars
                 .into_iter()
                 .map(|t| MsgVariant {

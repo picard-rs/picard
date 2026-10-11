@@ -49,7 +49,7 @@ where
     Msg: Message,
 {
     match mbox.try_enqueue(msg) {
-        Ok(_) => {
+        Ok(()) => {
             if !mbox.is_scheduled() {
                 mbox.set_scheduled(true);
                 kernel.schedule();
@@ -67,7 +67,7 @@ pub fn dispatch_any(
     mbox: &Arc<dyn AnySender>,
     kernel: &KernelRef,
 ) -> Result<(), AnyEnqueueError> {
-    mbox.try_any_enqueue(msg, sender).map(|_| {
+    mbox.try_any_enqueue(msg, sender).map(|()| {
         if !mbox.is_sched() {
             mbox.set_sched(true);
             kernel.schedule();

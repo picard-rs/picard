@@ -149,7 +149,7 @@ impl Props {
     /// // start the actor and get an `ActorRef`
     /// let actor = sys.actor_of_props("user", props).unwrap();
     /// ```
-    /// Creates an `ActorProducer` from a type which implements ActorFactory with no factory method parameters.
+    /// Creates an `ActorProducer` from a type which implements `ActorFactory` with no factory method parameters.
     ///
     /// # Examples
     ///
@@ -184,7 +184,7 @@ impl Props {
         Self::new_from(A::create)
     }
 
-    /// Creates an `ActorProducer` from a type which implements ActorFactoryArgs with one or more factory method parameters.
+    /// Creates an `ActorProducer` from a type which implements `ActorFactoryArgs` with one or more factory method parameters.
     ///
     /// # Examples
     /// An actor requiring a single parameter.
@@ -346,7 +346,7 @@ where
     where
         F: Fn() -> A + Send + 'static,
     {
-        ActorProps {
+        Self {
             creator: Box::new(creator),
         }
     }
@@ -393,7 +393,7 @@ where
     where
         F: Fn(Args) -> A + Send + 'static,
     {
-        ActorPropsWithArgs {
+        Self {
             creator: Box::new(creator),
             args,
         }

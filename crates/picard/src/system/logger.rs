@@ -7,7 +7,7 @@ use slog::{Drain, Level, Logger, Never, OwnedKVList, Record, info, o};
 use std::str::FromStr;
 use std::sync::Arc;
 
-pub(crate) type GlobalLoggerGuard = Arc<slog_scope::GlobalLoggerGuard>;
+pub type GlobalLoggerGuard = Arc<slog_scope::GlobalLoggerGuard>;
 
 #[derive(Clone)]
 pub struct LoggerConfig {
@@ -19,7 +19,7 @@ pub struct LoggerConfig {
 
 impl From<&PicardConfig> for LoggerConfig {
     fn from(config: &PicardConfig) -> Self {
-        LoggerConfig {
+        Self {
             time_fmt: config.log.time_format.clone(),
             date_fmt: config.log.date_format.clone(),
             filter: config.log.filter.clone(),
@@ -28,7 +28,7 @@ impl From<&PicardConfig> for LoggerConfig {
     }
 }
 
-pub(crate) fn default_log(cfg: &PicardConfig) -> LoggingSystem {
+pub fn default_log(cfg: &PicardConfig) -> LoggingSystem {
     let cfg = LoggerConfig::from(cfg);
 
     let drain = DefaultConsoleLogger::new(cfg.clone())
@@ -48,7 +48,7 @@ struct DefaultConsoleLogger {
 
 impl DefaultConsoleLogger {
     fn new(cfg: LoggerConfig) -> Self {
-        DefaultConsoleLogger { cfg }
+        Self { cfg }
     }
 }
 
@@ -87,7 +87,7 @@ pub struct DeadLetterLogger {
 
 impl ActorFactoryArgs<(ActorRef<ChannelMsg<DeadLetter>>, LoggingSystem)> for DeadLetterLogger {
     fn create_args((dl_chan, logger): (ActorRef<ChannelMsg<DeadLetter>>, LoggingSystem)) -> Self {
-        DeadLetterLogger { dl_chan, logger }
+        Self { dl_chan, logger }
     }
 }
 
@@ -109,6 +109,6 @@ impl Actor for DeadLetterLogger {
         info!(
             self.logger,
             "DeadLetter: {:?} => {:?} ({:?})", msg.sender, msg.recipient, msg.msg
-        )
+        );
     }
 }

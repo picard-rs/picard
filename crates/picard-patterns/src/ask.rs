@@ -6,7 +6,10 @@ use futures::FutureExt;
 use futures::channel::oneshot::{Sender as ChannelSender, channel};
 use futures::future::RemoteHandle;
 
-use picard::actors::*;
+use picard::actors::{
+    Actor, ActorRefFactory, BoxActor, Context, Message, Props, Run, Sender, Tell,
+    TmpActorRefFactory,
+};
 
 /// Convenience fuction to send and receive a message from an actor
 ///
@@ -82,7 +85,7 @@ struct AskActor<Msg> {
 
 impl<Msg: Message> AskActor<Msg> {
     fn create(tx: Arc<Mutex<Option<ChannelSender<Msg>>>>) -> BoxActor<Msg> {
-        let ask = AskActor { tx };
+        let ask = Self { tx };
         Box::new(ask)
     }
 }

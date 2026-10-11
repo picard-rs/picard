@@ -25,7 +25,7 @@ pub struct Channel<Msg: Message> {
 
 impl<Msg: Message> Default for Channel<Msg> {
     fn default() -> Self {
-        Channel {
+        Self {
             subs: HashMap::new(),
         }
     }
@@ -131,14 +131,14 @@ where
     fn receive(&mut self, ctx: &ChannelCtx<Msg>, msg: Publish<Msg>, sender: Sender) {
         // send system event to actors subscribed to all topics
         if let Some(subs) = self.subs.get(&All.into()) {
-            for sub in subs.iter() {
+            for sub in subs {
                 sub.tell(msg.msg.clone(), sender.clone());
             }
         }
 
         // send system event to actors subscribed to the topic
         if let Some(subs) = self.subs.get(&msg.topic) {
-            for sub in subs.iter() {
+            for sub in subs {
                 sub.tell(msg.msg.clone(), sender.clone());
             }
         }
@@ -209,7 +209,7 @@ impl Receive<Publish<SystemEvent>> for EventsChannel {
     ) {
         // send system event to actors subscribed to all topics
         if let Some(subs) = self.0.subs.get(&All.into()) {
-            for sub in subs.iter() {
+            for sub in subs {
                 let evt = SystemMsg::Event(msg.msg.clone());
                 sub.send_system_message(evt);
             }
@@ -217,7 +217,7 @@ impl Receive<Publish<SystemEvent>> for EventsChannel {
 
         // send system event to actors subscribed to the topic
         if let Some(subs) = self.0.subs.get(&msg.topic) {
-            for sub in subs.iter() {
+            for sub in subs {
                 let evt = SystemMsg::Event(msg.msg.clone());
                 sub.send_system_message(evt);
             }
@@ -276,28 +276,28 @@ pub enum ChannelMsg<Msg: Message> {
 // publish
 impl<Msg: Message> From<Publish<Msg>> for ChannelMsg<Msg> {
     fn from(val: Publish<Msg>) -> Self {
-        ChannelMsg::Publish(val)
+        Self::Publish(val)
     }
 }
 
 // subscribe
 impl<Msg: Message> From<Subscribe<Msg>> for ChannelMsg<Msg> {
     fn from(val: Subscribe<Msg>) -> Self {
-        ChannelMsg::Subscribe(val)
+        Self::Subscribe(val)
     }
 }
 
 // unsubscribe
 impl<Msg: Message> From<Unsubscribe<Msg>> for ChannelMsg<Msg> {
     fn from(val: Unsubscribe<Msg>) -> Self {
-        ChannelMsg::Unsubscribe(val)
+        Self::Unsubscribe(val)
     }
 }
 
 // unsubscribe
 impl<Msg: Message> From<UnsubscribeAll<Msg>> for ChannelMsg<Msg> {
     fn from(val: UnsubscribeAll<Msg>) -> Self {
-        ChannelMsg::UnsubscribeAll(val)
+        Self::UnsubscribeAll(val)
     }
 }
 
@@ -309,22 +309,22 @@ pub struct Topic(String);
 
 impl From<&str> for Topic {
     fn from(topic: &str) -> Self {
-        Topic(topic.to_string())
+        Self(topic.to_string())
     }
 }
 
 impl From<String> for Topic {
     fn from(topic: String) -> Self {
-        Topic(topic)
+        Self(topic)
     }
 }
 
 impl From<&SystemEvent> for Topic {
     fn from(evt: &SystemEvent) -> Self {
         match *evt {
-            SystemEvent::ActorCreated(_) => Topic::from("actor.created"),
-            SystemEvent::ActorTerminated(_) => Topic::from("actor.terminated"),
-            SystemEvent::ActorRestarted(_) => Topic::from("actor.restarted"),
+            SystemEvent::ActorCreated(_) => Self::from("actor.created"),
+            SystemEvent::ActorTerminated(_) => Self::from("actor.terminated"),
+            SystemEvent::ActorRestarted(_) => Self::from("actor.restarted"),
         }
     }
 }
@@ -334,7 +334,7 @@ pub struct All;
 
 impl From<All> for Topic {
     fn from(all: All) -> Self {
-        Topic::from("*")
+        Self::from("*")
     }
 }
 
@@ -348,9 +348,9 @@ pub enum SysTopic {
 impl From<SysTopic> for Topic {
     fn from(evt: SysTopic) -> Self {
         match evt {
-            SysTopic::ActorCreated => Topic::from("actor.created"),
-            SysTopic::ActorTerminated => Topic::from("actor.terminated"),
-            SysTopic::ActorRestarted => Topic::from("actor.restarted"),
+            SysTopic::ActorCreated => Self::from("actor.created"),
+            SysTopic::ActorTerminated => Self::from("actor.terminated"),
+            SysTopic::ActorRestarted => Self::from("actor.restarted"),
         }
     }
 }

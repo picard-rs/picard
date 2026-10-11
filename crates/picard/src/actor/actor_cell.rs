@@ -16,7 +16,12 @@ use uuid::Uuid;
 use crate::{
     AnyMessage, Envelope, Message,
     actor::actor_ref::SystemTell,
-    actor::{props::ActorFactory, *},
+    actor::{
+        Actor, ActorArgs, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference,
+        ActorSelection, ActorSelectionFactory, ActorUri, BasicActorRef, BoxActorProd, CreateError,
+        DeadLetter, MsgResult, Props, Publish, Sender, Strategy, Tell, TmpActorRefFactory,
+        props::ActorFactory,
+    },
     kernel::{
         kernel_ref::{KernelRef, dispatch, dispatch_any},
         mailbox::{AnyEnqueueError, AnySender, MailboxSender},
@@ -54,8 +59,8 @@ impl ActorCell {
         system: &ActorSystem,
         mailbox: Arc<dyn AnySender>,
         sys_mailbox: MailboxSender<SystemMsg>,
-    ) -> ActorCell {
-        ActorCell {
+    ) -> Self {
+        Self {
             inner: Arc::new(ActorCellInner {
                 uri,
                 parent,
@@ -70,13 +75,13 @@ impl ActorCell {
         }
     }
 
-    pub(crate) fn init(self, kernel: &KernelRef) -> ActorCell {
+    pub(crate) fn init(self, kernel: &KernelRef) -> Self {
         let inner = ActorCellInner {
             kernel: Some(kernel.clone()),
             ..self.inner.deref().clone()
         };
 
-        ActorCell {
+        Self {
             inner: Arc::new(inner),
         }
     }
@@ -148,7 +153,7 @@ impl ActorCell {
     }
 
     pub fn remove_child(&self, actor: &BasicActorRef) {
-        self.inner.children.remove(actor)
+        self.inner.children.remove(actor);
     }
 
     pub fn receive_cmd<A: Actor>(&self, cmd: SystemCmd, actor: &mut Option<A>) {
@@ -165,24 +170,24 @@ impl ActorCell {
 
         self.inner.is_terminating.store(true, Ordering::Relaxed);
 
-        if !self.has_children() {
-            self.kernel().terminate();
-            post_stop(actor);
-        } else {
+        if self.has_children() {
             for child in self.inner.children.iter() {
                 self.stop(&child);
             }
+        } else {
+            self.kernel().terminate();
+            post_stop(actor);
         }
     }
 
     pub fn restart(&self) {
-        if !self.has_children() {
-            self.kernel().restart();
-        } else {
+        if self.has_children() {
             self.inner.is_restarting.store(true, Ordering::Relaxed);
             for child in self.inner.children.iter() {
                 self.stop(&child);
             }
+        } else {
+            self.kernel().restart();
         }
     }
 
@@ -245,7 +250,7 @@ impl TmpActorRefFactory for ActorCell {
         _props: BoxActorProd<A>,
     ) -> Result<ActorRef<A::Msg>, CreateError> {
         let name = rand::random::<u64>();
-        let _name = format!("{}", name);
+        let _name = format!("{name}");
 
         // self.inner
         //     .kernel
@@ -255,7 +260,7 @@ impl TmpActorRefFactory for ActorCell {
 
     fn tmp_actor_of<A: ActorFactory>(&self) -> Result<ActorRef<<A as Actor>::Msg>, CreateError> {
         let name = rand::random::<u64>();
-        let _name = format!("{}", name);
+        let _name = format!("{name}");
 
         // self.inner
         //     .kernel
@@ -272,7 +277,7 @@ impl TmpActorRefFactory for ActorCell {
         A: ActorFactoryArgs<Args>,
     {
         let name = rand::random::<u64>();
-        let _name = format!("{}", name);
+        let _name = format!("{name}");
 
         // self.inner
         //     .kernel
@@ -321,13 +326,13 @@ where
             }),
         };
 
-        ExtendedCell { cell, mailbox }
+        Self { cell, mailbox }
     }
 
     pub(crate) fn init(self, kernel: &KernelRef) -> Self {
         let cell = self.cell.init(kernel);
 
-        ExtendedCell { cell, ..self }
+        Self { cell, ..self }
     }
 
     pub fn myself(&self) -> ActorRef<Msg> {
@@ -396,15 +401,15 @@ where
     }
 
     pub(crate) fn handle_failure(&self, failed: BasicActorRef, strategy: Strategy) {
-        self.cell.handle_failure(failed, strategy)
+        self.cell.handle_failure(failed, strategy);
     }
 
     pub(crate) fn receive_cmd<A: Actor>(&self, cmd: SystemCmd, actor: &mut Option<A>) {
-        self.cell.receive_cmd(cmd, actor)
+        self.cell.receive_cmd(cmd, actor);
     }
 
     pub(crate) fn death_watch<A: Actor>(&self, terminated: &BasicActorRef, actor: &mut Option<A>) {
-        self.cell.death_watch(terminated, actor)
+        self.cell.death_watch(terminated, actor);
     }
 }
 
@@ -631,8 +636,8 @@ pub struct Children {
 }
 
 impl Children {
-    pub fn new() -> Children {
-        Children {
+    pub fn new() -> Self {
+        Self {
             actors: Arc::new(DashMap::new()),
         }
     }

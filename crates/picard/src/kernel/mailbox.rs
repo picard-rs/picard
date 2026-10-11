@@ -8,7 +8,7 @@ use crate::{
     AnyMessage, Envelope, Message,
     actor::actor_cell::ExtendedCell,
     actor::actor_ref::SystemTell,
-    actor::*,
+    actor::{Actor, ActorReference, BasicActorRef, Context, DeadLetter, Publish, Sender, Tell},
     kernel::{
         Dock,
         queue::{EnqueueResult, QueueEmpty, QueueReader, QueueWriter, queue},
@@ -27,8 +27,8 @@ pub trait MailboxSchedule {
 pub struct AnyEnqueueError;
 
 impl From<()> for AnyEnqueueError {
-    fn from(_: ()) -> AnyEnqueueError {
-        AnyEnqueueError
+    fn from((): ()) -> Self {
+        Self
     }
 }
 
@@ -90,7 +90,7 @@ where
     }
 
     fn set_sched(&self, b: bool) {
-        self.set_scheduled(b)
+        self.set_scheduled(b);
     }
 
     fn is_sched(&self) -> bool {
@@ -312,7 +312,7 @@ fn handle_failed<A>(failed: BasicActorRef, cell: &ExtendedCell<A::Msg>, actor: &
 where
     A: Actor,
 {
-    cell.handle_failure(failed, actor.as_mut().unwrap().supervisor_strategy())
+    cell.handle_failure(failed, actor.as_mut().unwrap().supervisor_strategy());
 }
 
 fn handle_evt<A>(
@@ -341,7 +341,7 @@ struct Sentinel<'a, Msg: Message> {
     mbox: &'a Mailbox<Msg>,
 }
 
-impl<'a, Msg> Drop for Sentinel<'a, Msg>
+impl<Msg> Drop for Sentinel<'_, Msg>
 where
     Msg: Message,
 {
@@ -367,7 +367,7 @@ where
 {
     while let Ok(Envelope { msg, sender }) = mbox.try_dequeue() {
         let dl = DeadLetter {
-            msg: format!("{:?}", msg),
+            msg: format!("{msg:?}"),
             sender,
             recipient: actor.clone(),
         };

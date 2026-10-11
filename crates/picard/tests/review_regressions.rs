@@ -141,7 +141,7 @@ struct RetryActor;
 impl Actor for RetryActor {
     type Msg = ();
 
-    fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {}
+    fn recv(&mut self, _: &Context<Self::Msg>, (): Self::Msg, _: Sender) {}
 }
 
 #[test]

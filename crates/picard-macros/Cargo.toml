@@ -12,6 +12,9 @@ license-file.workspace = true
 [lib]
 proc-macro = true
 
+[lints]
+workspace = true
+
 [dependencies]
 syn = { version = "2", features = ["parsing", "full", "extra-traits", "proc-macro"] }
 quote = "1.0"

@@ -19,3 +19,19 @@ chrono = "0.4"
 config = "0.15"
 futures = "0.3.4"
 log = "0.4"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Documentation sections for every fallible/panicking function would be mostly boilerplate.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# `picard::actors` is a prelude meant to be glob-imported.
+wildcard_imports = "allow"
+# Changing these would alter public signatures or trait-shaped APIs.
+needless_pass_by_value = "allow"
+unused_self = "allow"
+# Benchmarks and timing code convert counters to floats and durations on purpose.
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"

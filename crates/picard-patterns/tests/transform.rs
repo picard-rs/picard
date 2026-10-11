@@ -35,7 +35,7 @@ enum MyMsg {
 struct UserActor {
     username: String,
     password: Option<String>,
-    rec: Receive<UserActor, MyMsg>,
+    rec: Receive<Self, MyMsg>,
 
     // we need a probe for this test
     probe: Option<TestProbe>,
@@ -43,7 +43,7 @@ struct UserActor {
 
 impl ActorFactoryArgs<String> for UserActor {
     fn create_args(username: String) -> Self {
-        UserActor {
+        Self {
             username,
             password: None,
             rec: Self::created,
@@ -64,7 +64,7 @@ impl UserActor {
                 // e.g. `sender.try_tell(Ok, None);`
 
                 // transform behavior to match a state where the *password is set*
-                transform!(self, UserActor::active);
+                transform!(self, Self::active);
             }
             MyMsg::Authenticate(_passwd) => {
                 // `MyMsg::Authenticate` is invalid since no user password
@@ -94,7 +94,7 @@ impl UserActor {
                 // set a new password
                 self.password = Some(passwd);
             }
-            _ => {
+            MyMsg::Probe(_) => {
                 // ignore probe
             }
         }
@@ -106,7 +106,7 @@ impl Actor for UserActor {
 
     fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
         // just call the currently set function
-        (self.rec)(self, ctx, msg, sender)
+        (self.rec)(self, ctx, msg, sender);
     }
 }
 

@@ -15,7 +15,7 @@ pub trait ProbeReceive {
     fn last_event_seconds(&self) -> u64;
 }
 
-/// The channel module provides an std::sync::mpsc::channel() based Probe
+/// The channel module provides an `std::sync::mpsc::channel()` based Probe
 /// that is suitable for use in a single, local application.
 /// This Probe cannot be serialized.
 pub mod channel {
@@ -131,7 +131,7 @@ pub mod channel {
             let mut listen = ChannelProbeReceive {
                 rx,
                 tx,
-                timer_start: Instant::now() - Duration::from_secs(2),
+                timer_start: Instant::now().checked_sub(Duration::from_secs(2)).unwrap(),
             };
 
             assert!(listen.last_event_seconds() >= 2);
@@ -178,8 +178,8 @@ mod tests {
 
 /// Macros that provide easy use of Probes
 pub mod macros {
-    /// Mimicks assert_eq!
-    /// Performs an assert_eq! on the first event sent by the probe.
+    /// Mimicks `assert_eq`!
+    /// Performs an `assert_eq`! on the first event sent by the probe.
     #[macro_export]
     macro_rules! p_assert_eq {
         ($listen:expr, $expected:expr) => {
@@ -188,6 +188,7 @@ pub mod macros {
     }
 
     /// Evaluates events sent from the probe with a vector of expected events.
+    ///
     /// If an unexpected event is received it will assert!(false).
     /// Each good event is removed from the expected vector.
     /// The assertion is complete when there are no more expected events.

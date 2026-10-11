@@ -8,12 +8,12 @@ pub struct ActorPath(Arc<str>);
 
 impl ActorPath {
     pub fn new(path: &str) -> Self {
-        ActorPath(Arc::from(path))
+        Self(Arc::from(path))
     }
 }
 
 impl PartialEq for ActorPath {
-    fn eq(&self, other: &ActorPath) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
@@ -46,7 +46,7 @@ impl fmt::Debug for ActorPath {
 
 impl Clone for ActorPath {
     fn clone(&self) -> Self {
-        ActorPath(self.0.clone())
+        Self(self.0.clone())
     }
 }
 
@@ -63,7 +63,7 @@ pub struct ActorUri {
 }
 
 impl PartialEq for ActorUri {
-    fn eq(&self, other: &ActorUri) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.path == other.path
     }
 }

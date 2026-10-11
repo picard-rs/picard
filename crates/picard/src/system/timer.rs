@@ -103,8 +103,8 @@ enum Scheduled {
 impl Scheduled {
     fn send_at(&self) -> Instant {
         match self {
-            Scheduled::Once(job) => job.send_at,
-            Scheduled::Repeat(job) => job.send_at,
+            Self::Once(job) => job.send_at,
+            Self::Repeat(job) => job.send_at,
         }
     }
 }
@@ -122,7 +122,7 @@ pub struct BasicTimer {
 
 impl BasicTimer {
     pub fn start() -> TimerRef {
-        let mut process = BasicTimer::default();
+        let mut process = Self::default();
         let (tx, rx) = mpsc::channel();
 
         thread::spawn(move || {
@@ -229,14 +229,14 @@ mod tests {
 
     impl ActorFactoryArgs<ChannelSender<()>> for NotifyActor {
         fn create_args(sender: ChannelSender<()>) -> Self {
-            NotifyActor(sender)
+            Self(sender)
         }
     }
 
     impl Actor for NotifyActor {
         type Msg = ();
 
-        fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {
+        fn recv(&mut self, _: &Context<Self::Msg>, (): Self::Msg, _: Sender) {
             let _ = self.0.send(());
         }
     }
@@ -252,7 +252,7 @@ mod tests {
 
         timer.schedule_repeat(RepeatJob {
             id: uuid::Uuid::new_v4(),
-            send_at: Instant::now() - Duration::from_secs(1),
+            send_at: Instant::now().checked_sub(Duration::from_secs(1)).unwrap(),
             interval: Duration::from_secs(30),
             receiver: actor.into(),
             sender: None,

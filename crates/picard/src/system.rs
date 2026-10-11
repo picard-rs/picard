@@ -29,7 +29,7 @@ pub enum SystemCmd {
 
 impl From<SystemCmd> for SystemMsg {
     fn from(val: SystemCmd) -> Self {
-        SystemMsg::Command(val)
+        Self::Command(val)
     }
 }
 
@@ -47,7 +47,7 @@ pub enum SystemEvent {
 
 impl From<SystemEvent> for SystemMsg {
     fn from(val: SystemEvent) -> Self {
-        SystemMsg::Event(val)
+        Self::Event(val)
     }
 }
 
@@ -68,37 +68,37 @@ pub struct ActorTerminated {
 
 impl From<ActorCreated> for SystemEvent {
     fn from(val: ActorCreated) -> Self {
-        SystemEvent::ActorCreated(val)
+        Self::ActorCreated(val)
     }
 }
 
 impl From<ActorRestarted> for SystemEvent {
     fn from(val: ActorRestarted) -> Self {
-        SystemEvent::ActorRestarted(val)
+        Self::ActorRestarted(val)
     }
 }
 
 impl From<ActorTerminated> for SystemEvent {
     fn from(val: ActorTerminated) -> Self {
-        SystemEvent::ActorTerminated(val)
+        Self::ActorTerminated(val)
     }
 }
 
 impl From<ActorCreated> for SystemMsg {
     fn from(val: ActorCreated) -> Self {
-        SystemMsg::Event(SystemEvent::ActorCreated(val))
+        Self::Event(SystemEvent::ActorCreated(val))
     }
 }
 
 impl From<ActorRestarted> for SystemMsg {
     fn from(val: ActorRestarted) -> Self {
-        SystemMsg::Event(SystemEvent::ActorRestarted(val))
+        Self::Event(SystemEvent::ActorRestarted(val))
     }
 }
 
 impl From<ActorTerminated> for SystemMsg {
     fn from(val: ActorTerminated) -> Self {
-        SystemMsg::Event(SystemEvent::ActorTerminated(val))
+        Self::Event(SystemEvent::ActorTerminated(val))
     }
 }
 
@@ -145,11 +145,16 @@ use uuid::Uuid;
 
 use crate::{
     AnyMessage, Message,
-    actor::{props::ActorFactory, *},
+    actor::{
+        Actor, ActorArgs, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference,
+        ActorSelection, ActorSelectionFactory, BoxActorProd, Channel, ChannelMsg, Context,
+        CreateError, DLChannelMsg, DeadLetter, EventsChannel, Props, Publish, Receive, Sender,
+        Subscribe, SysTopic, Tell, TmpActorRefFactory, Topic, props::ActorFactory,
+    },
     kernel::provider::{Provider, create_root},
     load_config,
-    system::logger::*,
-    system::timer::*,
+    system::logger::{DeadLetterLogger, GlobalLoggerGuard, default_log},
+    system::timer::{Job, OnceJob, RepeatJob, TimerRef},
     validate::{InvalidPath, validate_name},
 };
 use slog::{Logger, debug};
@@ -177,7 +182,7 @@ pub struct SystemBuilder {
 
 impl SystemBuilder {
     pub fn new() -> Self {
-        SystemBuilder::default()
+        Self::default()
     }
 
     pub fn create(self) -> Result<ActorSystem, SystemError> {
@@ -192,35 +197,38 @@ impl SystemBuilder {
         };
         let log = self
             .log
-            .map(|log| LoggingSystem::new(log, None))
-            .unwrap_or_else(|| default_log(&cfg));
+            .map_or_else(|| default_log(&cfg), |log| LoggingSystem::new(log, None));
 
         ActorSystem::create(name.as_ref(), exec, log, cfg)
     }
 
+    #[must_use]
     pub fn name(self, name: &str) -> Self {
-        SystemBuilder {
+        Self {
             name: Some(name.to_string()),
             ..self
         }
     }
 
+    #[must_use]
     pub fn cfg(self, cfg: PicardConfig) -> Self {
-        SystemBuilder {
+        Self {
             cfg: Some(cfg),
             ..self
         }
     }
 
+    #[must_use]
     pub fn exec(self, exec: ThreadPool) -> Self {
-        SystemBuilder {
+        Self {
             exec: Some(exec),
             ..self
         }
     }
 
+    #[must_use]
     pub fn log(self, log: Logger) -> Self {
-        SystemBuilder {
+        Self {
             log: Some(log),
             ..self
         }
@@ -275,34 +283,34 @@ impl ActorSystem {
     /// Create a new `ActorSystem` instance
     ///
     /// Requires a type that implements the `Model` trait.
-    pub fn new() -> Result<ActorSystem, SystemError> {
+    pub fn new() -> Result<Self, SystemError> {
         let cfg = load_config()?;
         validate_config(&cfg)?;
         let exec = default_exec(&cfg)?;
         let log = default_log(&cfg);
 
-        ActorSystem::create("picard", exec, log, cfg)
+        Self::create("picard", exec, log, cfg)
     }
 
     /// Create a new `ActorSystem` instance with provided name
     ///
     /// Requires a type that implements the `Model` trait.
-    pub fn with_name(name: &str) -> Result<ActorSystem, SystemError> {
+    pub fn with_name(name: &str) -> Result<Self, SystemError> {
         let cfg = load_config()?;
         validate_config(&cfg)?;
         let exec = default_exec(&cfg)?;
         let log = default_log(&cfg);
 
-        ActorSystem::create(name, exec, log, cfg)
+        Self::create(name, exec, log, cfg)
     }
 
     /// Create a new `ActorSystem` instance bypassing default config behavior
-    pub fn with_config(name: &str, cfg: PicardConfig) -> Result<ActorSystem, SystemError> {
+    pub fn with_config(name: &str, cfg: PicardConfig) -> Result<Self, SystemError> {
         validate_config(&cfg)?;
         let exec = default_exec(&cfg)?;
         let log = default_log(&cfg);
 
-        ActorSystem::create(name, exec, log, cfg)
+        Self::create(name, exec, log, cfg)
     }
 
     fn create(
@@ -310,7 +318,7 @@ impl ActorSystem {
         exec: ThreadPool,
         log: LoggingSystem,
         cfg: PicardConfig,
-    ) -> Result<ActorSystem, SystemError> {
+    ) -> Result<Self, SystemError> {
         validate_name(name).map_err(|_| SystemError::InvalidName(name.into()))?;
         // Process Configuration
         let debug = cfg.debug;
@@ -335,7 +343,7 @@ impl ActorSystem {
         };
 
         // 2. create uninitialized system
-        let mut sys = ActorSystem {
+        let mut sys = Self {
             proto: Arc::new(proto),
             exec,
             log,
@@ -863,7 +871,7 @@ pub struct SystemSettings {
 
 impl From<&PicardConfig> for SystemSettings {
     fn from(config: &PicardConfig) -> Self {
-        SystemSettings {
+        Self {
             msg_process_limit: config.mailbox.msg_process_limit,
         }
     }
@@ -876,7 +884,7 @@ struct ThreadPoolConfig {
 
 impl From<&PicardConfig> for ThreadPoolConfig {
     fn from(config: &PicardConfig) -> Self {
-        ThreadPoolConfig {
+        Self {
             pool_size: config.dispatcher.pool_size,
             stack_size: config.dispatcher.stack_size,
         }
@@ -952,7 +960,7 @@ fn default_exec(cfg: &PicardConfig) -> Result<ThreadPool, SystemError> {
         .stack_size(exec_cfg.stack_size)
         .name_prefix("pool-thread-#")
         .create()
-        .map_err(|err| err.into())
+        .map_err(std::convert::Into::into)
 }
 
 #[derive(Clone)]
@@ -978,13 +986,13 @@ struct ShutdownActor {
 
 impl ActorFactoryArgs<Arc<Mutex<Option<oneshot::Sender<()>>>>> for ShutdownActor {
     fn create_args(tx: Arc<Mutex<Option<oneshot::Sender<()>>>>) -> Self {
-        ShutdownActor::new(tx)
+        Self::new(tx)
     }
 }
 
 impl ShutdownActor {
     fn new(tx: Arc<Mutex<Option<oneshot::Sender<()>>>>) -> Self {
-        ShutdownActor { tx }
+        Self { tx }
     }
 }
 

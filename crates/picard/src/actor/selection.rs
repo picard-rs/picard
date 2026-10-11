@@ -42,7 +42,7 @@ impl ActorSelection {
         anchor: BasicActorRef,
         // dl: &BasicActorRef,
         path: String,
-    ) -> Result<ActorSelection, InvalidPath> {
+    ) -> Result<Self, InvalidPath> {
         validate_path(&path)?;
 
         let path_vec: Vec<Selection> = path
@@ -56,7 +56,7 @@ impl ActorSelection {
             })
             .collect();
 
-        Ok(ActorSelection {
+        Ok(Self {
             anchor,
             // dl: dl.clone(),
             path_vec,
