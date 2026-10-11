@@ -53,13 +53,20 @@ scaling and a traffic surge.
   actor through a `tokio::sync::watch` channel and turns browser commands into supervisor
   messages. It cannot touch actor state, and rendering is fully decoupled from simulation.
 
+## Selecting actors
+
+Click a vehicle or junction to inspect it. **Ctrl-click** (or Cmd-click) adds or removes actors
+from a multi-selection, and dragging a box over the map selects everything inside it (hold Ctrl to
+add to the current selection). With several actors selected, **Kill** and **Crash** apply to all
+of them at once. Pan with Shift-drag or the right mouse button.
+
 ## Scenarios
 
 | Scenario              | UI                                   | What happens                                                               |
 | --------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
 | A Massive concurrency | 100 / 1,000 / 5,000 / 10,000 buttons | Vehicle actors are spawned in batches of 250 per district                  |
 | B Message passing     | Click a vehicle                      | Inspector shows live sent/received messages with sender, receiver and time |
-| C Fault injection     | **Kill actor** / **Crash actor**     | See below                                                                  |
+| C Fault injection     | **Kill actor** / **Crash actor** (also for a multi-selection) | See below                                                                  |
 | D Traffic surge       | **Surge in selected district**       | 800 vehicles head for that district's centre                               |
 | E Dynamic lifecycle   | **Add / Remove selected** district   | A whole subtree is spawned or stopped; actor count and message rate follow |
 

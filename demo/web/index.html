@@ -88,7 +88,7 @@ tr.new td{background:#17324a}
 <div id="main">
   <canvas id="city"></canvas>
   <div id="legend"><i style="background:#3ddc97"></i>moving<i style="background:#ffc857"></i>waiting<i style="background:#4cc2ff"></i>crossing<i style="background:#7f8da8"></i>parked</div>
-  <div id="hud">scroll to zoom · drag to pan · double-click to reset view · click a vehicle or junction to inspect</div>
+  <div id="hud">scroll to zoom · shift/right-drag to pan · double-click to reset view · click to inspect · ctrl-click or drag a box to select several</div>
 </div>
 
 <aside id="right">
@@ -193,6 +193,7 @@ function onFrame(m) {
     }
   }
   for (const id of veh.keys()) if (!seen.has(id)) veh.delete(id);
+  pruneSelection();
   m._total = total; m._waiting = waiting;
   updateMetrics(m);
   if (m.inspect) { inspect = m.inspect; inspectAt = performance.now(); renderInspector(); }
@@ -257,7 +258,13 @@ function kindColor(k) { return {RequestIntersectionEntry: "#4cc2ff", EntryGrante
 let shownTimes = new Set();
 function renderInspector() {
   const el = $("insp");
-  if (!selected) { el.innerHTML = '<div class="note">Click a vehicle or a junction on the map.</div>'; return; }
+  if (multi.size) {
+    const v = [...multi].filter(id => id.startsWith("v-")).length;
+    el.innerHTML = `<div style="font-size:15px"><b>${multi.size} actors selected</b></div>
+      <div class="note">${v} vehicle${v === 1 ? "" : "s"}, ${multi.size - v} junction${multi.size - v === 1 ? "" : "s"}. Ctrl-click toggles one actor; click an actor to inspect it alone.</div>` + killButtons();
+    return;
+  }
+  if (!selected) { el.innerHTML = '<div class="note">Click a vehicle or a junction on the map. Ctrl-click or drag a box to select several.</div>'; return; }
   const stale = performance.now() - inspectAt > 2500;
   const i = inspect && inspect.id === selected.id ? inspect : null;
   if (!i || stale) {
@@ -289,12 +296,27 @@ function renderInspector() {
     <table><tr><th>t</th><th>from</th><th>to</th><th>message</th></tr>${rows || '<tr><td colspan="4" class="note">waiting for traffic…</td></tr>'}</table>`;
 }
 function killButtons() {
+  const n = currentIds().length, what = n > 1 ? `${n} actors` : "actor";
   return `<div class="row" style="margin-top:8px">
-    <button class="danger" onclick="kill('terminate')" title="The actor stops itself. Nothing restarts it.">Kill actor</button>
-    <button class="danger" onclick="kill('crash')" title="The actor panics. Its parent's supervisor strategy (Restart) decides what happens.">Crash actor</button></div>`;
+    <button class="danger" onclick="kill('terminate')" title="Each actor stops itself. Nothing restarts it.">Kill ${what}</button>
+    <button class="danger" onclick="kill('crash')" title="Each actor fails. Its parent's supervisor strategy (Restart) decides what happens.">Crash ${what}</button></div>`;
 }
-function kill(mode) { if (selected) send({cmd: "kill", id: selected.id, mode}); }
-function select(id) { selected = id ? {id} : null; inspect = null; inspectAt = performance.now(); shownTimes = new Set(); send({cmd: "select", id: id || null}); renderInspector(); }
+let multi = new Set();
+const isSelected = id => multi.has(id) || (selected !== null && selected.id === id);
+function currentIds() { return multi.size ? [...multi] : selected ? [selected.id] : []; }
+function kill(mode) { for (const id of currentIds()) send({cmd: "kill", id, mode}); }
+function setSelection(ids) {
+  ids = [...new Set(ids)];
+  if (ids.length <= 1) { select(ids[0] || null); return; }
+  multi = new Set(ids); selected = null; inspect = null;
+  send({cmd: "select", id: null}); renderInspector();
+}
+function pruneSelection() {
+  if (!multi.size) return;
+  const alive = [...multi].filter(id => !id.startsWith("v-") || veh.has(+id.slice(2)));
+  if (alive.length !== multi.size) setSelection(alive);
+}
+function select(id) { multi = new Set(); selected = id ? {id} : null; inspect = null; inspectAt = performance.now(); shownTimes = new Set(); send({cmd: "select", id: id || null}); renderInspector(); }
 
 /* ---------- canvas ---------- */
 function resize() {
@@ -352,7 +374,7 @@ function draw(now) {
     ctx.fillStyle = signalColor(j, 1); ctx.fillRect(sx - r, sy - r - bar, 2 * r, bar); ctx.fillRect(sx - r, sy + r, 2 * r, bar);
     ctx.fillStyle = signalColor(j, 2); ctx.fillRect(sx - r - bar, sy - r, bar, 2 * r); ctx.fillRect(sx + r, sy - r, bar, 2 * r);
     if (j[7]) { ctx.strokeStyle = "#ffc857"; ctx.lineWidth = 1; ctx.strokeRect(sx - r - 3, sy - r - 3, 2 * r + 6, 2 * r + 6); }
-    if (selected && selected.id === `i-${j[0]}-${j[1]}`) { ctx.strokeStyle = "#4cc2ff"; ctx.lineWidth = 2; ctx.strokeRect(sx - r - 5, sy - r - 5, 2 * r + 10, 2 * r + 10); }
+    if (isSelected(`i-${j[0]}-${j[1]}`)) { ctx.strokeStyle = "#4cc2ff"; ctx.lineWidth = 2; ctx.strokeRect(sx - r - 5, sy - r - 5, 2 * r + 10, 2 * r + 10); }
   }
   const span = Math.max(60, Math.min(250, lastAt - prevAt || 100));
   const f = Math.min(1, (now - lastAt) / span);
@@ -365,10 +387,16 @@ function draw(now) {
     ctx.fillStyle = STATE_COLORS[o.state] || "#fff";
     ctx.fillRect(sx - vr, sy - vr, vr * 2, vr * 2);
     if (selected && selected.id === "v-" + id) selPos = [sx, sy];
+    else if (multi.has("v-" + id)) { ctx.strokeStyle = "#4cc2ff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(sx, sy, 7, 0, 7); ctx.stroke(); }
   }
   if (selPos) {
     ctx.strokeStyle = "#4cc2ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(selPos[0], selPos[1], 9, 0, 7); ctx.stroke();
     drawPulse(selPos, now);
+  }
+  if (drag && drag.box && drag.moved) {
+    ctx.fillStyle = "rgba(76,194,255,.12)"; ctx.strokeStyle = "#4cc2ff"; ctx.lineWidth = 1;
+    ctx.fillRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0);
+    ctx.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0);
   }
   if (hoverId !== null && veh.has(hoverId)) {
     const o = veh.get(hoverId), [sx, sy] = T(o.dispX, o.dispY);
@@ -408,11 +436,35 @@ function pick(mx, my) {
   if (j && Math.hypot(gx - wx, gy - wy) < .3) return {kind: "i", x: gx, y: gy, j};
   return null;
 }
-cvs.addEventListener("mousedown", e => { drag = {x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false}; });
+function boxSelect(x0, y0, x1, y1) {
+  const [ax, ay] = screenToWorld(Math.min(x0, x1), Math.min(y0, y1)), [bx, by] = screenToWorld(Math.max(x0, x1), Math.max(y0, y1));
+  const ids = [];
+  for (const [id, o] of veh) {
+    const x = o.dispX ?? o.nx, y = o.dispY ?? o.ny;
+    if (x >= ax && x <= bx && y >= ay && y <= by) ids.push("v-" + id);
+  }
+  for (const j of juncs.values()) if (j[0] >= ax && j[0] <= bx && j[1] >= ay && j[1] <= by) ids.push(`i-${j[0]}-${j[1]}`);
+  return ids;
+}
+cvs.addEventListener("contextmenu", e => e.preventDefault());
+cvs.addEventListener("mousedown", e => {
+  const r = cvs.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const pan = e.button !== 0 || e.shiftKey;
+  drag = {x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false, box: !pan, x0: mx, y0: my, x1: mx, y1: my};
+});
 addEventListener("mouseup", e => {
-  if (drag && !drag.moved && e.target === cvs) {
+  if (drag && drag.box && drag.moved) {
+    const ids = boxSelect(drag.x0, drag.y0, drag.x1, drag.y1);
+    setSelection(e.ctrlKey || e.metaKey ? [...currentIds(), ...ids] : ids);
+  } else if (drag && !drag.moved && e.target === cvs && e.button === 0) {
     const r = cvs.getBoundingClientRect(), p = pick(e.clientX - r.left, e.clientY - r.top);
-    if (p) select(p.kind === "v" ? "v-" + p.id : `i-${p.x}-${p.y}`);
+    if (p) {
+      const id = p.kind === "v" ? "v-" + p.id : `i-${p.x}-${p.y}`;
+      if (e.ctrlKey || e.metaKey) {
+        const ids = currentIds();
+        setSelection(ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+      } else select(id);
+    }
   }
   drag = null;
 });
@@ -420,7 +472,8 @@ addEventListener("mousemove", e => {
   const r = cvs.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
   if (drag) {
     if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) drag.moved = true;
-    if (drag.moved) { cam.x = drag.cx - (e.clientX - drag.x) / cam.z; cam.y = drag.cy - (e.clientY - drag.y) / cam.z; }
+    if (drag.box) { drag.x1 = mx; drag.y1 = my; }
+    else if (drag.moved) { cam.x = drag.cx - (e.clientX - drag.x) / cam.z; cam.y = drag.cy - (e.clientY - drag.y) / cam.z; }
     return;
   }
   const tip = $("tip");
