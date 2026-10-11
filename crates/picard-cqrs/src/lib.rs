@@ -130,12 +130,12 @@ where
 
     fn sleep_instances(&mut self, ctx: &Context<EntityMsg<EntityActorMsg<Pro>>>) {
         let count = self.instances.len();
-        let threshhold = SystemTime::now() - self.sleep_after;
+        let threshold = SystemTime::now() - self.sleep_after;
 
         let (stop, keep): (Vec<_>, Vec<_>) = self
             .instances
             .drain()
-            .partition(|(_, instance)| threshhold > instance.last_used);
+            .partition(|(_, instance)| threshold > instance.last_used);
 
         // stop instances
         for instance in stop {
@@ -276,7 +276,7 @@ mod tests {
     fn cqrs() {
         let system = ActorSystem::new().unwrap();
 
-        let em = Entity::new(&system, BankAccountActorFact, "BankAccont", None).unwrap();
+        let em = Entity::new(&system, BankAccountActorFact, "BankAccount", None).unwrap();
 
         let ids = ["12345678", "87654321", "65555555"];
         for id in &ids {

@@ -143,7 +143,7 @@ pub trait Actor: Send + 'static {
     /// Invoked after an actor has started.
     ///
     /// Any post initialization can be performed here, such as writing
-    /// to a log file, emmitting metrics.
+    /// to a log file, emitting metrics.
     ///
     /// Panics in `post_start` follow the supervision strategy.
     fn post_start(&mut self, ctx: &Context<Self::Msg>) {}
@@ -204,7 +204,7 @@ impl<T: Actor + ?Sized> Actor for Box<T> {
 
 /// Receive and handle a specific message type
 ///
-/// This trait is typically used in conjuction with the #[actor]
+/// This trait is typically used in conjunction with the #[actor]
 /// attribute macro and implemented for each message type to receive.
 ///
 /// # Examples
