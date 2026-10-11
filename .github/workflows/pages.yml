@@ -7,6 +7,8 @@ on:
       - master
     paths:
       - web/**
+      - demo/**
+      - crates/picard/**
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -54,6 +56,24 @@ jobs:
 
       - name: Merge front page and documentation
         run: cp -r web/frontpage/public/. _site/
+
+      - name: Install Rust with the wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: Build Living City demo (WebAssembly)
+        run: |
+          wasm-pack build demo --release --target web --out-dir web/pkg --no-default-features
+          mkdir -p _site/demo/pkg
+          sed 's|<meta name="transport" content="ws">|<meta name="transport" content="worker">|' demo/web/index.html > _site/demo/index.html
+          cp demo/web/worker.js _site/demo/
+          cp demo/web/pkg/living_city.js demo/web/pkg/living_city_bg.wasm _site/demo/pkg/
 
       - uses: actions/upload-pages-artifact@v3
         with:

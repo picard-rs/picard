@@ -3,7 +3,9 @@
 //! It fans the clock out to its children, owns their address book, and aggregates their reports
 //! into one snapshot per frame so that individual vehicles never talk to the browser.
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc};
+
+use picard::platform::Instant;
 
 use picard::actors::{
     Actor, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference, Context, Sender, Subscribe,

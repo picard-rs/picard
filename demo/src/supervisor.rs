@@ -1,14 +1,11 @@
 //! Simulation supervisor: owns the districts, the clock and the simulation lifecycle.
 
-use std::{
-    collections::BTreeMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use picard::actors::{
     Actor, ActorFactoryArgs, ActorRef, ActorRefFactory, Context, Sender, Tell, Timer,
 };
+use picard::platform::Instant;
 
 use crate::{
     city::{DEFAULT_ACTIVE, DISTRICT_COUNT, Node, district_nodes},

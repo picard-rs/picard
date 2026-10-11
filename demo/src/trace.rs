@@ -1,9 +1,8 @@
 //! Per-actor message counters and an opt-in, bounded message log for the inspector.
 
-use std::{
-    collections::VecDeque,
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, time::Duration};
+
+use picard::platform::Instant;
 
 use serde_json::{Value, json};
 

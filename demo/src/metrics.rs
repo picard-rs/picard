@@ -11,8 +11,10 @@
 
 use std::{
     sync::atomic::{AtomicU64, Ordering::Relaxed},
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+use picard::platform::Instant;
 
 pub const BUCKETS: usize = 24;
 

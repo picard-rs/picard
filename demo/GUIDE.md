@@ -10,6 +10,21 @@ cargo run -p living-city --release            # then open http://127.0.0.1:8080
 cargo run -p living-city --release -- --port 9000 --vehicles 1000 --host 0.0.0.0
 ```
 
+### In the browser (WebAssembly)
+
+The same simulation also runs entirely in the browser, which is how it is published on GitHub
+Pages (`/demo/`). Picard is compiled to `wasm32-unknown-unknown` and runs in a Web Worker:
+
+```sh
+wasm-pack build demo --release --target web --out-dir web/pkg --no-default-features
+python3 -m http.server -d demo/web 8000       # then open http://localhost:8000/?worker
+```
+
+Differences from the native server: there are no threads, so all actors share one thread
+(about 150k messages/s with 5,000 vehicles in headless Chromium); CPU and memory are not
+available; **Crash actor** reports the failure with `Context::fail()` instead of panicking
+(wasm aborts on panic), and the parent restarts the actor as usual.
+
 Click **Demo Tour** for a guided walk through concurrency, message passing, fault isolation,
 scaling and a traffic surge.
 

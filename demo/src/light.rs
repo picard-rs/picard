@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::{
     city::{Axis, Node},
     metrics::Metrics,
-    msg::{Fault, JunctionMsg, LightMsg, Signal},
+    msg::{Fault, JunctionMsg, LightMsg, Signal, crash},
     trace::Trace,
 };
 
@@ -157,9 +157,7 @@ impl Actor for Light {
                 let node = self.args.node;
                 self.trace.received(ms, "Demand", || node.junction_name());
             }
-            LightMsg::Fault(Fault::Crash) => {
-                panic!("fault injected into {}", self.args.node.light_name())
-            }
+            LightMsg::Fault(Fault::Crash) => crash(ctx, &self.args.node.light_name()),
             LightMsg::Fault(Fault::Terminate) => ctx.stop(ctx.myself()),
             LightMsg::Inspect(req) => {
                 self.trace.watch();

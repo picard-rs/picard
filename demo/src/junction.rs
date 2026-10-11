@@ -16,7 +16,7 @@ use crate::{
     metrics::Metrics,
     msg::{
         DistrictMsg, Fault, GatewayMsg, JunctionMsg, JunctionView, LightMsg, Signal, VehicleId,
-        VehicleMsg,
+        VehicleMsg, crash,
     },
     trace::Trace,
 };
@@ -413,7 +413,7 @@ impl Actor for Junction {
                 self.degraded = None;
                 self.set_signal(signal);
             }
-            JunctionMsg::Fault(Fault::Crash) => panic!("fault injected into {}", self.me()),
+            JunctionMsg::Fault(Fault::Crash) => crash(ctx, &self.me()),
             JunctionMsg::Fault(Fault::Terminate) => ctx.stop(ctx.myself()),
             JunctionMsg::FaultLight(fault) => {
                 if let Some(light) = &self.light {

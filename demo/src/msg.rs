@@ -1,8 +1,10 @@
 //! Messages exchanged between the simulation actors.
 
-use std::{collections::HashMap, fmt, sync::Arc, time::Instant};
+use std::{collections::HashMap, fmt, sync::Arc};
 
-use picard::actors::{ActorRef, SystemEvent};
+use picard::platform::Instant;
+
+use picard::actors::{ActorRef, Context, Message, SystemEvent};
 
 use crate::city::{Axis, Node};
 
@@ -23,6 +25,20 @@ pub enum Fault {
     Terminate,
     /// The actor panics: its parent's supervision strategy decides what happens.
     Crash,
+}
+
+/// Makes the calling actor fail so that its parent's supervision strategy takes over.
+///
+/// Natively the actor panics. `wasm32-unknown-unknown` aborts on panic, so there the actor
+/// reports its own failure to the parent instead, which restarts it the same way.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn crash<M: Message>(_: &Context<M>, name: &str) {
+    panic!("fault injected into {name}");
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn crash<M: Message>(ctx: &Context<M>, _: &str) {
+    ctx.fail();
 }
 
 /// What every inspectable actor needs to answer an inspector request.

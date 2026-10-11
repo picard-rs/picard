@@ -1,6 +1,8 @@
 //! Turns the raw counters into per-second rates plus process CPU and memory.
 
-use std::{fmt::Write, fs, sync::Arc, time::Instant};
+use std::{fmt::Write, fs, sync::Arc};
+
+use picard::platform::Instant;
 
 use crate::metrics::{BUCKETS, Metrics, summarize};
 

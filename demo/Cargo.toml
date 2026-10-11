@@ -11,12 +11,29 @@ default-run = "living-city"
 [lints]
 workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "living-city"
+path = "src/main.rs"
+required-features = ["server"]
+
+[features]
+default = ["server"]
+# Native web server (axum + tokio). Disabled for the WebAssembly build.
+server = ["dep:axum", "tokio/rt-multi-thread", "tokio/macros", "tokio/time", "tokio/net", "tokio/signal"]
+
 [dependencies]
 picard.workspace = true
-axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+axum = { version = "0.8", features = ["ws"], optional = true }
+tokio = { version = "1", features = ["sync"] }
 serde_json = "1"
 rand = "0.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["console"] }
 
 [dev-dependencies]
 serde_json = "1"

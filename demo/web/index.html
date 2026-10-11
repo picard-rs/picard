@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+<meta name="transport" content="ws">
 <meta charset="utf-8">
 <title>Living City · Picard actor showcase</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -123,17 +124,42 @@ const STATE_COLORS = ["#3ddc97", "#ffc857", "#4cc2ff", "#7f8da8"];
 const STATE_NAMES = ["moving", "waiting", "crossing", "parked"];
 const COUNTS = [100, 1000, 5000, 10000];
 
-function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+// "ws": the native server streams frames over a WebSocket. "worker": the simulation runs as
+// WebAssembly in a Web Worker next to the page (the GitHub Pages build).
+const MODE = new URLSearchParams(location.search).has("worker")
+  ? "worker" : (document.querySelector('meta[name="transport"]')?.content || "ws");
+let link = null;
+
+function send(o) { if (link) link(JSON.stringify(o)); }
+
+function onText(text) {
+  const m = JSON.parse(text);
+  if (m.hello) { hello = m.hello; buildDistricts(); return; }
+  if (m.districts) onFrame(m);
+}
+
+function setLive(on) {
+  $("conn").textContent = on ? "live" : "offline"; $("conn").className = on ? "on" : "";
+}
 
 function connect() {
+  if (MODE === "worker") return connectWorker();
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-  ws.onopen = () => { $("conn").textContent = "live"; $("conn").className = "on"; if (selected) send({cmd: "select", id: selected.id}); };
-  ws.onclose = () => { $("conn").textContent = "offline"; $("conn").className = ""; setTimeout(connect, 1000); };
-  ws.onmessage = e => {
-    const m = JSON.parse(e.data);
-    if (m.hello) { hello = m.hello; buildDistricts(); return; }
-    if (m.districts) onFrame(m);
+  ws.onopen = () => { link = t => ws.readyState === 1 && ws.send(t); setLive(true); if (selected) send({cmd: "select", id: selected.id}); };
+  ws.onclose = () => { link = null; setLive(false); setTimeout(connect, 1000); };
+  ws.onmessage = e => onText(e.data);
+}
+
+function connectWorker() {
+  $("conn").textContent = "loading wasm…";
+  const worker = new Worker("worker.js", {type: "module"});
+  worker.onmessage = e => {
+    if (e.data.error) { $("conn").textContent = "error: " + e.data.error; return; }
+    if (!link) { link = t => worker.postMessage({text: t}); setLive(true); }
+    onText(e.data);
   };
+  worker.onerror = e => { $("conn").textContent = "error: " + e.message; };
+  worker.postMessage({start: 400});
 }
 
 function worldToScreen(x, y) { return [(x * 40 + 40 - cam.x) * cam.z, (y * 40 + 40 - cam.y) * cam.z]; }
@@ -189,7 +215,7 @@ function updateMetrics(m) {
     ["Grants / denies per s", fmt(x.grants) + " / " + fmt(x.denies), "app"],
     ["Retries / reroutes", fmt(x.retries) + " / " + fmt(x.reroutes), "app"],
     ["Safety violations", fmt(x.violations), "app"],
-    ["CPU / memory", fmt(x.cpu) + "% / " + fmt(x.rss) + " MB", "rt"],
+    ["CPU / memory", MODE === "worker" ? "n/a (browser)" : fmt(x.cpu) + "% / " + fmt(x.rss) + " MB", "rt"],
   ];
   $("stats").innerHTML = rows.map(r => `<div class="stat"><span>${r[0]}${tag(r[2])}</span><b>${r[1]}</b></div>`).join("");
   const push = (a, v) => { a.push(v); if (a.length > HIST) a.shift(); };
@@ -435,7 +461,7 @@ function charts() {
   line($("ch1"), [hist.msgs], ["#4cc2ff"]); $("c1v").textContent = fmt(m.processed);
   line($("ch2"), [hist.dmean, hist.dp95], ["#3ddc97", "#ffc857"]); $("c2v").textContent = fmt(m.delay_mean) + " / " + fmt(m.delay_p95);
   line($("ch3"), [hist.trips, hist.cong], ["#b388ff", "#ff5d6c"]); $("c3v").textContent = fmt(m.trips_rate, 1) + "/s · " + fmt(last._total ? last._waiting / last._total * 100 : 0) + "%";
-  line($("ch4"), [hist.cpu, hist.rss], ["#ffc857", "#4cc2ff"]); $("c4v").textContent = fmt(m.cpu) + "% · " + fmt(m.rss) + " MB";
+  line($("ch4"), [hist.cpu, hist.rss], ["#ffc857", "#4cc2ff"]); $("c4v").textContent = MODE === "worker" ? "n/a (browser)" : fmt(m.cpu) + "% · " + fmt(m.rss) + " MB";
 }
 setInterval(charts, 500);
 

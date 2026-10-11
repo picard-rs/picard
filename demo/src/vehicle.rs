@@ -4,12 +4,12 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
-    time::Instant,
 };
 
 use picard::actors::{
     Actor, ActorFactoryArgs, ActorRef, ActorRefFactory, ActorReference, Context, Sender, Tell,
 };
+use picard::platform::Instant;
 use rand::Rng;
 use serde_json::json;
 
@@ -18,7 +18,7 @@ use crate::{
     metrics::Metrics,
     msg::{
         Directory, DistrictMsg, Fault, GatewayMsg, InspectReq, JunctionMsg, Tick, VehicleId,
-        VehicleMsg, VehicleView, state,
+        VehicleMsg, VehicleView, crash, state,
     },
     trace::Trace,
 };
@@ -415,7 +415,7 @@ impl Actor for Vehicle {
                 self.dir = dir;
                 self.replan_after_directory_change();
             }
-            VehicleMsg::Fault(Fault::Crash) => panic!("fault injected into {}", self.name()),
+            VehicleMsg::Fault(Fault::Crash) => crash(ctx, &self.name()),
             VehicleMsg::Fault(Fault::Terminate) => ctx.stop(ctx.myself()),
             VehicleMsg::Inspect(req) => self.inspect(ctx, &req),
         }
