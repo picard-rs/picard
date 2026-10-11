@@ -73,7 +73,6 @@ Transform makes changing actor behavior based on its current state easier to rea
 Example:
 
 ```rust
-#[macro_use]
 use picard_patterns::transform::*;
 
 impl ShoppingCart {

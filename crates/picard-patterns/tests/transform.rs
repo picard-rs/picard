@@ -1,10 +1,7 @@
-#[macro_use]
-extern crate picard_patterns;
-#[macro_use]
-extern crate picard_testkit;
-
 use picard::actors::*;
-use picard_patterns::transform::Receive;
+use picard_patterns::transform;
+use picard_patterns::transformation::Receive;
+use picard_testkit::p_assert_eq;
 use picard_testkit::probe::channel::{ChannelProbe, probe};
 use picard_testkit::probe::{Probe, ProbeReceive};
 

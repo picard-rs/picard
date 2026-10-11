@@ -1,9 +1,4 @@
-#![crate_name = "picard"]
 #![deny(clippy::all)]
-// #![deny(clippy::pedantic)]
-// #![deny(clippy::nursery)]
-#![allow(clippy::new_ret_no_self)]
-#![allow(clippy::large_enum_variant)]
 
 mod validate;
 

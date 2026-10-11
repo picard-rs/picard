@@ -1,4 +1,3 @@
-extern crate picard;
 use picard::actors::*;
 
 use std::time::Duration;

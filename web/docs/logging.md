@@ -3,9 +3,6 @@
 Picard provides logging out of the box which is built on top of the `Log` crate logging facade. The logger module starts during the actor system's start, making log macros such as `info!`, `debug!`, `error!` available immediately after `ActorSystem::new`:
 
 ```rust
-#[macro_use]
-extern crate log;
-
 let sys = ActorSystem::new().unwrap();
 info!("My first log message!");
 ```
