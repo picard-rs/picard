@@ -1,5 +1,7 @@
 use std::{
-    sync::mpsc,
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
+    sync::mpsc::{self, RecvTimeoutError},
     thread,
     time::{Duration, Instant},
 };
@@ -94,112 +96,129 @@ impl RepeatJob {
 
 // Default timer implementation
 
+enum Scheduled {
+    Once(OnceJob),
+    Repeat(RepeatJob),
+}
+
+impl Scheduled {
+    fn send_at(&self) -> Instant {
+        match self {
+            Scheduled::Once(job) => job.send_at,
+            Scheduled::Repeat(job) => job.send_at,
+        }
+    }
+}
+
+/// Timer that sleeps until the next deadline instead of polling.
+///
+/// The worker thread exits once every `TimerRef` has been dropped.
+#[derive(Default)]
 pub struct BasicTimer {
-    once_jobs: Vec<OnceJob>,
-    repeat_jobs: Vec<RepeatJob>,
+    jobs: HashMap<Uuid, Scheduled>,
+    // Min-heap of deadlines. Cancelled or rescheduled jobs leave stale entries
+    // behind, which are skipped when their deadline is popped.
+    deadlines: BinaryHeap<Reverse<(Instant, Uuid)>>,
 }
 
 impl BasicTimer {
-    pub fn start(cfg: &PicardConfig) -> TimerRef {
-        let cfg = BasicTimerConfig::from(cfg);
-
-        let mut process = BasicTimer {
-            once_jobs: Vec::new(),
-            repeat_jobs: Vec::new(),
-        };
-
+    pub fn start(_cfg: &PicardConfig) -> TimerRef {
+        let mut process = BasicTimer::default();
         let (tx, rx) = mpsc::channel();
+
         thread::spawn(move || {
             loop {
-                process.execute_once_jobs();
-                process.execute_repeat_jobs();
+                process.run_due();
 
-                if let Ok(job) = rx.try_recv() {
-                    match job {
-                        Job::Cancel(id) => process.cancel(&id),
-                        Job::Once(job) => process.schedule_once(job),
-                        Job::Repeat(job) => process.schedule_repeat(job),
+                let job = match process.next_deadline() {
+                    Some(deadline) => {
+                        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                            Ok(job) => job,
+                            Err(RecvTimeoutError::Timeout) => continue,
+                            Err(RecvTimeoutError::Disconnected) => break,
+                        }
                     }
-                }
+                    None => match rx.recv() {
+                        Ok(job) => job,
+                        Err(_) => break,
+                    },
+                };
 
-                thread::sleep(Duration::from_millis(cfg.frequency_millis));
+                process.handle(job);
+                while let Ok(job) = rx.try_recv() {
+                    process.handle(job);
+                }
             }
         });
 
         tx
     }
 
-    pub fn execute_once_jobs(&mut self) {
-        let (send, keep): (Vec<OnceJob>, Vec<OnceJob>) = self
-            .once_jobs
-            .drain(..)
-            .partition(|j| Instant::now() >= j.send_at);
-
-        // send those messages where the 'send_at' time has been reached or elapsed
-        for job in send {
-            job.send();
-        }
-
-        // for those messages that are not to be sent yet, just put them back on the vec
-        for job in keep {
-            self.once_jobs.push(job);
+    fn handle(&mut self, job: Job) {
+        match job {
+            Job::Cancel(id) => self.cancel(&id),
+            Job::Once(job) => self.schedule_once(job),
+            Job::Repeat(job) => self.schedule_repeat(job),
         }
     }
 
-    pub fn execute_repeat_jobs(&mut self) {
-        for job in self.repeat_jobs.iter_mut() {
-            if Instant::now() >= job.send_at {
-                job.send_at = Instant::now() + job.interval;
-                job.send();
+    fn next_deadline(&mut self) -> Option<Instant> {
+        while let Some(Reverse((at, id))) = self.deadlines.peek().copied() {
+            if self.jobs.get(&id).is_some_and(|job| job.send_at() == at) {
+                return Some(at);
+            }
+            self.deadlines.pop();
+        }
+        None
+    }
+
+    /// Sends every job whose deadline has been reached.
+    pub fn run_due(&mut self) {
+        let now = Instant::now();
+        while let Some(at) = self.next_deadline() {
+            if at > now {
+                break;
+            }
+            let Some(Reverse((_, id))) = self.deadlines.pop() else {
+                break;
+            };
+            match self.jobs.remove(&id) {
+                Some(Scheduled::Once(job)) => job.send(),
+                Some(Scheduled::Repeat(mut job)) => {
+                    job.send();
+                    job.send_at = now + job.interval;
+                    self.insert(Scheduled::Repeat(job));
+                }
+                None => {}
             }
         }
     }
 
+    fn insert(&mut self, job: Scheduled) {
+        let (id, at) = match &job {
+            Scheduled::Once(j) => (j.id, j.send_at),
+            Scheduled::Repeat(j) => (j.id, j.send_at),
+        };
+        self.deadlines.push(Reverse((at, id)));
+        self.jobs.insert(id, job);
+    }
+
     pub fn cancel(&mut self, id: &Uuid) {
-        // slightly sub optimal way of canceling because we don't know the job type
-        // so need to do the remove on both vecs
-
-        if let Some(pos) = self.once_jobs.iter().position(|job| &job.id == id) {
-            self.once_jobs.remove(pos);
-        }
-
-        if let Some(pos) = self.repeat_jobs.iter().position(|job| &job.id == id) {
-            self.repeat_jobs.remove(pos);
-        }
+        self.jobs.remove(id);
     }
 
     pub fn schedule_once(&mut self, job: OnceJob) {
-        if Instant::now() >= job.send_at {
-            job.send();
-        } else {
-            self.once_jobs.push(job);
-        }
+        self.insert(Scheduled::Once(job));
     }
 
-    pub fn schedule_repeat(&mut self, mut job: RepeatJob) {
-        if Instant::now() >= job.send_at {
-            job.send();
-            job.send_at = Instant::now() + job.interval;
-        }
-        self.repeat_jobs.push(job);
-    }
-}
-
-struct BasicTimerConfig {
-    frequency_millis: u64,
-}
-
-impl From<&PicardConfig> for BasicTimerConfig {
-    fn from(config: &PicardConfig) -> Self {
-        BasicTimerConfig {
-            frequency_millis: config.scheduler.frequency_millis,
-        }
+    pub fn schedule_repeat(&mut self, job: RepeatJob) {
+        self.insert(Scheduled::Repeat(job));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BasicTimer, RepeatJob};
+    use super::{BasicTimer, OnceJob, RepeatJob};
     use crate::AnyMessage;
     use crate::actors::*;
     use std::{
@@ -230,10 +249,7 @@ mod tests {
         let actor = system
             .actor_of_args::<NotifyActor, _>("timer-repeat-test", tx)
             .unwrap();
-        let mut timer = BasicTimer {
-            once_jobs: Vec::new(),
-            repeat_jobs: Vec::new(),
-        };
+        let mut timer = BasicTimer::default();
 
         timer.schedule_repeat(RepeatJob {
             id: uuid::Uuid::new_v4(),
@@ -244,8 +260,37 @@ mod tests {
             msg: AnyMessage::new_repeatable(()),
         });
 
+        timer.run_due();
         rx.recv_timeout(Duration::from_secs(1)).unwrap();
-        timer.execute_repeat_jobs();
+        timer.run_due();
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn once_jobs_fire_when_due_and_can_be_cancelled() {
+        let system = ActorSystem::new().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let actor = system
+            .actor_of_args::<NotifyActor, _>("timer-once-test", tx)
+            .unwrap();
+        let mut timer = BasicTimer::default();
+        let job = |id, delay| OnceJob {
+            id,
+            send_at: Instant::now() + delay,
+            receiver: actor.clone().into(),
+            sender: None,
+            msg: AnyMessage::new(()),
+        };
+
+        let cancelled = uuid::Uuid::new_v4();
+        timer.schedule_once(job(cancelled, Duration::ZERO));
+        timer.schedule_once(job(uuid::Uuid::new_v4(), Duration::ZERO));
+        timer.schedule_once(job(uuid::Uuid::new_v4(), Duration::from_secs(60)));
+        timer.cancel(&cancelled);
+
+        timer.run_due();
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+        assert!(timer.next_deadline().is_some());
     }
 }

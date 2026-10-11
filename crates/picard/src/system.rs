@@ -945,6 +945,8 @@ pub struct DispatcherConfig {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct SchedulerConfig {
+    /// Retained for configuration compatibility. The default timer now sleeps
+    /// until the next deadline instead of polling at this interval.
     #[default(50)]
     pub frequency_millis: u64,
 }
