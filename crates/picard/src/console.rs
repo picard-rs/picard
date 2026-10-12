@@ -80,8 +80,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         peer: Option<String>,
     },
-    /// List the remote peers that [`Command::Send`] can target.
+    /// List the remote peers that [`Command::Send`] and [`Command::Forward`] can target.
     Peers,
+    /// Run `command` on the console of the remote `peer`, registered with
+    /// [`ActorSystem::register_console_peer_query`], and return its result.
+    Forward {
+        peer: String,
+        command: Box<Command>,
+    },
 }
 
 fn default_page_limit() -> usize {
@@ -171,7 +177,19 @@ impl Console {
 /// user, so it must not contain secrets.
 pub type ConsolePeerSender = Arc<dyn Fn(&str, Value) -> Result<(), String> + Send + Sync>;
 
+/// Runs one console request, given as JSON text, on a remote system and returns the
+/// JSON text of its response. The error text is shown to the console user.
+pub type ConsolePeerQuery = Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
+
 impl ActorSystem {
+    /// Let the console run commands on the console of a remote system: `forward` requests
+    /// naming `name` are serialized as a [`Request`] and passed to `query`. The remote
+    /// side should answer with [`Console::handle_text`] and must not accept
+    /// [`Command::Forward`] itself.
+    pub fn register_console_peer_query(&self, name: impl Into<String>, query: ConsolePeerQuery) {
+        self.provider.console().register_query(name.into(), query);
+    }
+
     /// Make a remote system reachable from the console: `send` requests naming `name` as
     /// their `peer` are passed to `sender`. Replaces an earlier peer of the same name.
     pub fn register_console_peer(&self, name: impl Into<String>, sender: ConsolePeerSender) {
@@ -237,9 +255,38 @@ pub fn is_valid_token(token: &str) -> bool {
 pub(crate) struct Registry {
     actors: DashMap<String, Arc<dyn ConsoleActor>>,
     peers: DashMap<String, ConsolePeerSender>,
+    queries: DashMap<String, ConsolePeerQuery>,
 }
 
 impl Registry {
+    pub(crate) fn register_query(&self, name: String, query: ConsolePeerQuery) {
+        self.queries.insert(name, query);
+    }
+
+    fn forward(&self, peer: &str, command: Command) -> Result<Value, ConsoleError> {
+        if matches!(command, Command::Forward { .. } | Command::Send { .. }) {
+            return Err(ConsoleError::new(
+                "invalid_request",
+                "Only inspection and management commands can be forwarded; use send with a peer",
+            ));
+        }
+        let query = self
+            .queries
+            .get(peer)
+            .map(|entry| Arc::clone(entry.value()))
+            .ok_or_else(|| ConsoleError::new("not_found", format!("No remote peer {peer}")))?;
+        let text = serde_json::to_string(&Request { id: 0, command })
+            .map_err(|err| ConsoleError::new("serialization", err.to_string()))?;
+        let reply = query(&text).map_err(|err| ConsoleError::new("remote_query", err))?;
+        let response: Response = serde_json::from_str(&reply)
+            .map_err(|err| ConsoleError::new("remote_query", format!("Invalid reply: {err}")))?;
+        match (response.result, response.error) {
+            (Some(result), None) => Ok(result),
+            (None, Some(error)) => Err(error),
+            _ => Err(ConsoleError::new("remote_query", "Invalid remote response")),
+        }
+    }
+
     pub(crate) fn register_peer(&self, name: String, sender: ConsolePeerSender) {
         self.peers.insert(name, sender);
     }
@@ -298,11 +345,21 @@ impl Registry {
     }
 
     pub(crate) fn execute(&self, command: Command) -> Result<Value, ConsoleError> {
+        let command = match command {
+            Command::Forward { peer, command } => return self.forward(&peer, *command),
+            command => command,
+        };
         let path = match &command {
+            Command::Forward { .. } => unreachable!("forwarded above"),
             Command::Peers => {
-                let mut peers: Vec<String> =
-                    self.peers.iter().map(|entry| entry.key().clone()).collect();
+                let mut peers: Vec<String> = self
+                    .peers
+                    .iter()
+                    .map(|entry| entry.key().clone())
+                    .chain(self.queries.iter().map(|entry| entry.key().clone()))
+                    .collect();
                 peers.sort();
+                peers.dedup();
                 return Ok(json!({ "peers": peers }));
             }
             Command::Send {
@@ -365,7 +422,7 @@ impl Registry {
             Command::Stop { .. } => actor.lifecycle(SystemCmd::Stop),
             Command::Restart { .. } => actor.lifecycle(SystemCmd::Restart),
             Command::Send { message, .. } => actor.send(message),
-            Command::Actors { .. } | Command::Peers => unreachable!(),
+            Command::Actors { .. } | Command::Peers | Command::Forward { .. } => unreachable!(),
         }
     }
 }

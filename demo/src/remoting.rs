@@ -17,6 +17,8 @@ use uuid::Uuid;
 pub const GATEWAY_PATH: &str = "/user/gateway";
 pub const SUPERVISOR_PATH: &str = "/user/supervisor";
 const IDENTITY_PATH: &str = "/_living_city/identity";
+#[cfg(feature = "console")]
+const CONSOLE_PATH: &str = "/_living_city/console";
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(60);
 const REDISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -105,18 +107,7 @@ pub fn start(
             .iter()
             .map(|peer| (format!("district-{}", peer.district), token.clone())),
     );
-    let local_handler = system.remote_handler();
-    let local_system_id = system.id();
-    let handler: RemoteHandler = Arc::new(move |peer_id, request: RemoteRequest| {
-        if request.destination.path == IDENTITY_PATH {
-            RemoteResponse::replied(
-                request.id,
-                serde_json::json!({ "system_id": local_system_id }),
-            )
-        } else {
-            local_handler(peer_id, request)
-        }
-    });
+    let handler = request_handler(system);
     let transport: Arc<dyn RemoteTransport> = Arc::new(WebSocketTransport);
     let listener = system
         .listen_remote_with(bind, authenticator, handler, transport.clone())
@@ -186,20 +177,88 @@ pub fn start(
             outgoing,
         };
         #[cfg(feature = "console")]
-        register_console_peer(system, &link);
+        register_console_peer(system, &link, &connection);
         links.push(link);
     }
 
     Ok((listener, links))
 }
 
-/// Lets the console `send @district-N PATH JSON` to the peer's actors.
+/// Answers identity and console queries itself and routes everything else to local actors.
+fn request_handler(system: &ActorSystem) -> RemoteHandler {
+    let local_handler = system.remote_handler();
+    let local_system_id = system.id();
+    #[cfg(feature = "console")]
+    let console = system.console();
+    Arc::new(move |peer_id, request: RemoteRequest| {
+        if request.destination.path == IDENTITY_PATH {
+            return RemoteResponse::replied(
+                request.id,
+                serde_json::json!({ "system_id": local_system_id }),
+            );
+        }
+        #[cfg(feature = "console")]
+        if request.destination.path == CONSOLE_PATH {
+            return console_reply(&console, &request);
+        }
+        local_handler(peer_id, request)
+    })
+}
+
+/// Runs a console request from a peer. Forwarding is refused so requests cannot bounce.
 #[cfg(feature = "console")]
-fn register_console_peer(system: &ActorSystem, link: &PeerLink) {
-    let link = link.clone();
+fn console_reply(console: &picard::console::Console, request: &RemoteRequest) -> RemoteResponse {
+    let text = request.payload.as_str().unwrap_or_default();
+    let forwarded = matches!(
+        serde_json::from_str::<picard::console::Request>(text),
+        Ok(picard::console::Request {
+            command: picard::console::Command::Forward { .. },
+            ..
+        })
+    );
+    if forwarded {
+        return RemoteResponse::rejected(
+            request.id,
+            picard::remoting::RemoteError::Rejected("console forwarding is not chained".into()),
+        );
+    }
+    RemoteResponse::replied(request.id, Value::String(console.handle_text(text)))
+}
+
+/// Lets the console reach the peer: `send @district-N PATH JSON` delivers to its actors and
+/// `@district-N COMMAND` runs a console command on it.
+#[cfg(feature = "console")]
+fn register_console_peer(
+    system: &ActorSystem,
+    link: &PeerLink,
+    connection: &picard::remoting::RemoteConnection,
+) {
+    let name = format!("district-{}", link.district);
+    let sender = link.clone();
     system.register_console_peer(
-        format!("district-{}", link.district),
-        Arc::new(move |path, message| link.send(path, &message)),
+        name.clone(),
+        Arc::new(move |path, message| sender.send(path, &message)),
+    );
+    let connection = connection.clone();
+    system.register_console_peer_query(
+        name,
+        Arc::new(move |request| {
+            let response = futures::executor::block_on(connection.send(
+                ActorAddress::local(Uuid::nil(), CONSOLE_PATH),
+                None,
+                Value::String(request.to_owned()),
+            ))
+            .map_err(|err| err.to_string())?;
+            if !response.accepted {
+                return Err(response
+                    .error
+                    .map_or_else(|| "request rejected".into(), |err| err.to_string()));
+            }
+            match response.payload {
+                Some(Value::String(text)) => Ok(text),
+                _ => Err("invalid reply from peer".into()),
+            }
+        }),
     );
 }
 

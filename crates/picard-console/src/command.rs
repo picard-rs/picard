@@ -17,6 +17,7 @@ stop PATH               Request actor termination
 restart PATH            Request actor restart
 send [@PEER] PATH JSON  Send a typed JSON message (server requires serde)
 peers                   List remote peers that send can target with @PEER
+@PEER COMMAND           Run actors, inspect, messages, pause, ... on a remote peer
 help                    Show this help
 quit                    Disconnect";
 
@@ -58,6 +59,18 @@ pub(crate) fn parse(line: &str) -> Result<Input, String> {
     let line = line.trim();
     if line.is_empty() {
         return Ok(Input::Empty);
+    }
+    if let Some(forwarded) = line.strip_prefix('@') {
+        let (peer, command) = forwarded
+            .split_once(char::is_whitespace)
+            .ok_or("Usage: @PEER COMMAND")?;
+        return match parse(command)? {
+            Input::Command(command) => Ok(Input::Command(Command::Forward {
+                peer: peer.to_owned(),
+                command: Box::new(command),
+            })),
+            _ => Err("Only actor commands can run on a peer".into()),
+        };
     }
     let (name, rest) = line
         .split_once(char::is_whitespace)
@@ -162,6 +175,19 @@ mod tests {
             parse("peers").unwrap(),
             Input::Command(Command::Peers)
         ));
+    }
+
+    #[test]
+    fn forwards_commands_to_a_peer() {
+        let Input::Command(Command::Forward { peer, command }) =
+            parse("@district-1 inspect /user/gateway").unwrap()
+        else {
+            panic!("Expected forward")
+        };
+        assert_eq!(peer, "district-1");
+        assert!(matches!(*command, Command::Inspect { .. }));
+        assert!(parse("@district-1").is_err());
+        assert!(parse("@district-1 quit").is_err());
     }
 
     #[test]
