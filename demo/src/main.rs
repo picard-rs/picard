@@ -98,7 +98,7 @@ struct ServerArgs {
     host: IpAddr,
 
     /// HTTP server port (zero selects an available port).
-    #[arg(long, env = "LIVING_CITY_PORT", default_value_t = 8080)]
+    #[arg(long, env = "LIVING_CITY_PORT", default_value_t = 8981)]
     port: u16,
 
     /// Initial number of vehicles.
@@ -337,7 +337,7 @@ mod tests {
     fn defaults_and_typed_arguments() {
         let cli = Cli::try_parse_from(["living-city"]).unwrap();
         assert_eq!(cli.server.host, "127.0.0.1".parse::<IpAddr>().unwrap());
-        assert_eq!(cli.server.port, 8080);
+        assert_eq!(cli.server.port, 8981);
         assert_eq!(cli.server.vehicles, 100);
         assert!(cli.command.is_none());
         let cli = Cli::try_parse_from([

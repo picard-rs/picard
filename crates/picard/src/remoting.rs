@@ -749,7 +749,7 @@ mod tests {
 
     #[test]
     fn bearer_credentials_are_not_in_debug_output() {
-        let peer = RemotePeer::new("orders", "ws://127.0.0.1:8080/remoting", "top-secret").unwrap();
+        let peer = RemotePeer::new("orders", "ws://127.0.0.1:8981/remoting", "top-secret").unwrap();
 
         assert_eq!(bearer_authorization("top-secret"), "Bearer top-secret");
         assert!(!format!("{peer:?}").contains("top-secret"));

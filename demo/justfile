@@ -5,7 +5,7 @@ set dotenv-load := true
 default:
     @just --list
 
-# Run the single-process demo on http://127.0.0.1:8080
+# Run the single-process demo on http://127.0.0.1:8981
 run *args:
     cargo run -p living-city --release -- {{ args }}
 
@@ -29,10 +29,10 @@ token:
 console district="0": token
     docker compose exec -it district-{{ district }} picard-console ws://127.0.0.1:9000/console
 
-# Build and start one container per district; UI on http://127.0.0.1:8080 (override with LIVING_CITY_PORT)
+# Build and start one container per district; UI on http://127.0.0.1:8981 (override with LIVING_CITY_PORT)
 up: token
     docker compose up --build -d
-    @echo "Living City: http://127.0.0.1:${LIVING_CITY_PORT:-8080}"
+    @echo "Living City: http://127.0.0.1:${LIVING_CITY_PORT:-8981}"
 
 # Stop and remove the containers
 down: token

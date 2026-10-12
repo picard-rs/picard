@@ -9,5 +9,5 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/living-city /workspace/target/release/picard-console /usr/local/bin/
-EXPOSE 8080 9100
+EXPOSE 8981 9100
 ENTRYPOINT ["/usr/local/bin/living-city"]

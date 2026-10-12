@@ -6,7 +6,7 @@ An interactive traffic simulation where every car, junction, traffic light and d
 ## Run it
 
 ```sh
-cargo run -p living-city --release            # then open http://127.0.0.1:8080
+cargo run -p living-city --release            # then open http://127.0.0.1:8981
 cargo run -p living-city --release -- --port 9000 --vehicles 1000 --host 0.0.0.0
 ```
 
@@ -62,7 +62,7 @@ populations drift from their target as vehicles migrate. Transparent remote
 With [just](https://just.systems), run these from `demo/`: `just up` creates a
 git-ignored `.env` with a random shared token (if missing) and starts the
 nine containers; `just down`, `just restart`, `just logs [service]` and
-`just ps` manage them. The UI is published on host port 8080; set
+`just ps` manage them. The UI is published on host port 8981; set
 `LIVING_CITY_PORT` (for example in `.env`) if that port is taken. `just console [district]` opens the Picard console of that district
 (default 0): each container runs the console on its own loopback address, which
 is never published, and `picard-console` ships in the image and is run via
@@ -75,7 +75,7 @@ docker compose -f demo/compose.yml up --build
 ```
 
 The compose file starts one container per district, connects them over the
-private Compose network, and publishes only the district-0 web UI on port 8080.
+private Compose network, and publishes only the district-0 web UI on port 8981.
 For production, supply a secret from a secret manager rather than a shell
 environment file.
 
@@ -113,7 +113,7 @@ through Picard's transport-agnostic `ActorSystem::console()` service:
 
 ```sh
 cargo run -p living-city --release --features console,serde -- --console-route
-cargo run -p picard-console -- ws://127.0.0.1:8080/console
+cargo run -p picard-console -- ws://127.0.0.1:8981/console
 ```
 
 The route requires the same token, a loopback `--host`, and the web server (it
@@ -216,13 +216,13 @@ of them at once. Pan with Shift-drag or the right mouse button.
 
 ## Scenarios
 
-| Scenario              | UI                                   | What happens                                                               |
-| --------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
-| A Massive concurrency | 100 / 1,000 / 5,000 / 10,000 buttons | Vehicle actors are spawned in batches of 250 per district                  |
-| B Message passing     | Click a vehicle                      | Inspector shows live sent/received messages with sender, receiver and time |
+| Scenario              | UI                                                            | What happens                                                               |
+| --------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| A Massive concurrency | 100 / 1,000 / 5,000 / 10,000 buttons                          | Vehicle actors are spawned in batches of 250 per district                  |
+| B Message passing     | Click a vehicle                                               | Inspector shows live sent/received messages with sender, receiver and time |
 | C Fault injection     | **Kill actor** / **Crash actor** (also for a multi-selection) | See below                                                                  |
-| D Traffic surge       | **Surge in selected district**       | 800 vehicles head for that district's centre                               |
-| E Dynamic lifecycle   | **Add / Remove selected** district   | A whole subtree is spawned or stopped; actor count and message rate follow |
+| D Traffic surge       | **Surge in selected district**                                | 800 vehicles head for that district's centre                               |
+| E Dynamic lifecycle   | **Add / Remove selected** district                            | A whole subtree is spawned or stopped; actor count and message rate follow |
 
 ### Failure semantics (what Picard really does)
 

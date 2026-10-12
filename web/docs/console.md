@@ -184,7 +184,7 @@ the console at `/console` on the demo's own web server (loopback `--host` only):
 
 ```sh
 cargo run -p living-city --release --features console,serde -- --console-route
-cargo run -p picard-console -- ws://127.0.0.1:8080/console
+cargo run -p picard-console -- ws://127.0.0.1:8981/console
 ```
 
 See the [Living City guide](../../demo/GUIDE.md)
