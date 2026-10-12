@@ -61,15 +61,19 @@ impl Bridge {
     /// Produces the next frame as JSON. Call it once per frame period.
     pub fn step(&mut self) -> String {
         self.n = self.n.wrapping_add(1);
+        let frame = self.sim.frames.borrow().clone();
         if self.n.is_multiple_of(SAMPLE_EVERY) {
-            self.sample_json = self.sampler.sample().to_json();
+            let mut sample = self.sampler.sample();
+            for remote in &frame.remote_samples {
+                sample.merge(remote);
+            }
+            self.sample_json = sample.to_json();
         }
         if let Some(id) = &self.selected
             && self.n.is_multiple_of(INSPECT_EVERY)
         {
             self.sim.tell(SupervisorMsg::Inspect { id: id.clone() });
         }
-        let frame = self.sim.frames.borrow().clone();
         encode(&frame, &self.sample_json, self.selected.as_deref())
     }
 

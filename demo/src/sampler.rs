@@ -10,6 +10,7 @@ const CLOCK_TICKS_PER_SEC: f64 = 100.0;
 const PAGE_SIZE: f64 = 4096.0;
 
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sample {
     pub uptime_s: f64,
     pub actors: u64,
@@ -36,6 +37,41 @@ pub struct Sample {
 }
 
 impl Sample {
+    /// Folds another process's sample into this one: counters, rates and resources add up,
+    /// latencies are averaged by tick rate, and the p95 is the worst of the two.
+    pub fn merge(&mut self, other: &Self) {
+        let weight = self.sim_ticks_rate + other.sim_ticks_rate;
+        let blend = |mine: f64, theirs: f64| {
+            if weight > 0.0 {
+                (mine * self.sim_ticks_rate + theirs * other.sim_ticks_rate) / weight
+            } else {
+                mine.max(theirs)
+            }
+        };
+        self.tick_delay_mean_us = blend(self.tick_delay_mean_us, other.tick_delay_mean_us);
+        self.handler_mean_us = blend(self.handler_mean_us, other.handler_mean_us);
+        self.tick_delay_p95_us = self.tick_delay_p95_us.max(other.tick_delay_p95_us);
+        self.handler_p95_us = self.handler_p95_us.max(other.handler_p95_us);
+        self.uptime_s = self.uptime_s.max(other.uptime_s);
+        self.actors += other.actors;
+        self.msgs_sent_rate += other.msgs_sent_rate;
+        self.msgs_processed_rate += other.msgs_processed_rate;
+        self.sim_ticks_rate += other.sim_ticks_rate;
+        self.grants_rate += other.grants_rate;
+        self.denies_rate += other.denies_rate;
+        self.trips_rate += other.trips_rate;
+        self.trips += other.trips;
+        self.retries += other.retries;
+        self.reroutes += other.reroutes;
+        self.violations += other.violations;
+        self.created += other.created;
+        self.terminated += other.terminated;
+        self.restarted += other.restarted;
+        self.dead_letters += other.dead_letters;
+        self.cpu_pct += other.cpu_pct;
+        self.rss_mb += other.rss_mb;
+    }
+
     #[must_use]
     pub fn to_json(&self) -> String {
         let mut s = String::with_capacity(512);
@@ -181,4 +217,33 @@ fn rss_bytes() -> f64 {
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
     pages as f64 * PAGE_SIZE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_sums_counters_and_weights_latency() {
+        let mut a = Sample {
+            actors: 10,
+            trips: 5,
+            sim_ticks_rate: 10.0,
+            tick_delay_mean_us: 100.0,
+            tick_delay_p95_us: 200.0,
+            ..Sample::default()
+        };
+        let b = Sample {
+            actors: 20,
+            trips: 7,
+            sim_ticks_rate: 30.0,
+            tick_delay_mean_us: 200.0,
+            tick_delay_p95_us: 800.0,
+            ..Sample::default()
+        };
+        a.merge(&b);
+        assert_eq!((a.actors, a.trips), (30, 12));
+        assert!((a.tick_delay_mean_us - 175.0).abs() < 1e-9);
+        assert!((a.tick_delay_p95_us - 800.0).abs() < 1e-9);
+    }
 }

@@ -5,20 +5,30 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+#[cfg(feature = "remoting")]
+use picard::platform::Instant;
+
 use picard::actors::{Actor, ActorFactoryArgs, Context, Sender, Timer};
 use tokio::sync::watch;
 
 use crate::{
     metrics::Metrics,
     msg::{DistrictSnapshot, GatewayMsg},
+    sampler::Sample,
 };
 #[cfg(feature = "remoting")]
 use crate::{
     msg::RemoteUpdate,
     remoting::{GATEWAY_PATH, PeerLink},
+    sampler::Sampler,
 };
 
 pub const FRAME_PERIOD: Duration = Duration::from_millis(100);
+#[cfg(feature = "remoting")]
+const HEARTBEAT_PERIOD: Duration = Duration::from_secs(1);
+/// A remote district that has been silent this long is treated as dead.
+#[cfg(feature = "remoting")]
+const PEER_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct Frame {
@@ -27,6 +37,7 @@ pub struct Frame {
     pub paused: bool,
     pub target: usize,
     pub inspect: Option<(String, String)>,
+    pub remote_samples: Vec<Sample>,
 }
 
 #[derive(Clone)]
@@ -53,6 +64,12 @@ pub struct Gateway {
     local_target: usize,
     #[cfg(feature = "remoting")]
     remote_status: BTreeMap<usize, (bool, usize)>,
+    #[cfg(feature = "remoting")]
+    remote_samples: BTreeMap<usize, Sample>,
+    #[cfg(feature = "remoting")]
+    last_seen: BTreeMap<usize, Instant>,
+    #[cfg(feature = "remoting")]
+    sampler: Option<Sampler>,
 }
 
 impl ActorFactoryArgs<GatewayArgs> for Gateway {
@@ -73,6 +90,12 @@ impl ActorFactoryArgs<GatewayArgs> for Gateway {
             local_target: 0,
             #[cfg(feature = "remoting")]
             remote_status: BTreeMap::new(),
+            #[cfg(feature = "remoting")]
+            remote_samples: BTreeMap::new(),
+            #[cfg(feature = "remoting")]
+            last_seen: BTreeMap::new(),
+            #[cfg(feature = "remoting")]
+            sampler: None,
         }
     }
 }
@@ -88,6 +111,17 @@ impl Actor for Gateway {
             None,
             GatewayMsg::Flush,
         );
+        #[cfg(feature = "remoting")]
+        if self.args.district.is_some() {
+            self.sampler = Some(Sampler::new(self.args.metrics.clone()));
+            ctx.schedule(
+                HEARTBEAT_PERIOD,
+                HEARTBEAT_PERIOD,
+                ctx.myself(),
+                None,
+                GatewayMsg::Heartbeat,
+            );
+        }
     }
 
     fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
@@ -100,6 +134,8 @@ impl Gateway {
         self.args.metrics.inc(&self.args.metrics.processed);
         match msg {
             GatewayMsg::Flush => {
+                #[cfg(feature = "remoting")]
+                self.drop_silent_peers();
                 self.seq += 1;
                 let frame = Frame {
                     seq: self.seq,
@@ -107,6 +143,7 @@ impl Gateway {
                     paused: self.paused,
                     target: self.target,
                     inspect: self.inspect.clone(),
+                    remote_samples: self.collect_remote_samples(),
                 };
                 let _ = self.args.tx.send(Arc::new(frame));
             }
@@ -171,6 +208,13 @@ impl Gateway {
                 }
             }
             #[cfg(feature = "remoting")]
+            GatewayMsg::Heartbeat => {
+                if let (Some(district), Some(sampler)) = (self.args.district, &mut self.sampler) {
+                    let sample = sampler.sample();
+                    self.relay(RemoteUpdate::Metrics { district, sample });
+                }
+            }
+            #[cfg(feature = "remoting")]
             GatewayMsg::RemoteUpdate(update) => self.apply_remote_update(update),
         }
     }
@@ -195,7 +239,20 @@ impl Gateway {
 
     #[cfg(feature = "remoting")]
     fn apply_remote_update(&mut self, update: RemoteUpdate) {
+        let sender = match &update {
+            RemoteUpdate::Snapshot(snapshot) => Some(snapshot.district),
+            RemoteUpdate::Status { district, .. } | RemoteUpdate::Metrics { district, .. } => {
+                Some(*district)
+            }
+            _ => None,
+        };
+        if let Some(district) = sender {
+            self.last_seen.insert(district, Instant::now());
+        }
         match update {
+            RemoteUpdate::Metrics { district, sample } => {
+                self.remote_samples.insert(district, sample);
+            }
             RemoteUpdate::Snapshot(snapshot) => {
                 self.generations
                     .entry(snapshot.district)
@@ -217,6 +274,34 @@ impl Gateway {
                 self.recompute_status();
             }
         }
+    }
+
+    #[cfg(feature = "remoting")]
+    fn drop_silent_peers(&mut self) {
+        let now = Instant::now();
+        let silent: Vec<usize> = self
+            .last_seen
+            .iter()
+            .filter(|(_, seen)| now.duration_since(**seen) > PEER_TIMEOUT)
+            .map(|(district, _)| *district)
+            .collect();
+        for district in silent {
+            self.last_seen.remove(&district);
+            self.remote_samples.remove(&district);
+            self.remote_status.remove(&district);
+            self.apply_district_gone(district);
+        }
+        self.recompute_status();
+    }
+
+    #[cfg(feature = "remoting")]
+    fn collect_remote_samples(&self) -> Vec<Sample> {
+        self.remote_samples.values().cloned().collect()
+    }
+
+    #[cfg(not(feature = "remoting"))]
+    fn collect_remote_samples(&self) -> Vec<Sample> {
+        Vec::new()
     }
 
     #[cfg(feature = "remoting")]

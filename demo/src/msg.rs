@@ -228,6 +228,8 @@ pub enum GatewayMsg {
         target: usize,
     },
     #[cfg(feature = "remoting")]
+    Heartbeat,
+    #[cfg(feature = "remoting")]
     RemoteUpdate(RemoteUpdate),
     #[cfg(feature = "remoting")]
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -251,6 +253,10 @@ pub enum RemoteUpdate {
         district: usize,
         paused: bool,
         target: usize,
+    },
+    Metrics {
+        district: usize,
+        sample: crate::sampler::Sample,
     },
 }
 
