@@ -129,7 +129,7 @@ impl ActorCell {
         self.inner.system.stats_recorder().message_sent(res.is_ok());
         #[cfg(feature = "tracing")]
         if res.is_err() {
-            tracing::debug!(actor = %self.uri().path, "message could not be delivered");
+            tracing::debug!(target: "picard::messaging", actor = %self.uri().path, "message could not be delivered");
         }
         res
     }
@@ -226,6 +226,7 @@ impl ActorCell {
     pub fn handle_failure(&self, failed: &BasicActorRef, strategy: Strategy) {
         #[cfg(feature = "tracing")]
         tracing::warn!(
+            target: "picard::actor::supervision",
             supervisor = %self.uri().path,
             actor = %failed.path(),
             strategy = match strategy {
@@ -397,6 +398,7 @@ where
         res.inspect_err(|e| {
             #[cfg(feature = "tracing")]
             tracing::debug!(
+                target: "picard::messaging",
                 actor = %self.cell.uri().path,
                 msg_type = std::any::type_name::<Msg>(),
                 "message could not be delivered; sending to dead letters"

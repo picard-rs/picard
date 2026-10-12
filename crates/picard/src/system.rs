@@ -411,7 +411,7 @@ impl ActorSystem {
 
         debug!(sys.log, "Actor system [{}] [{}] started", sys.id(), name);
         #[cfg(feature = "tracing")]
-        tracing::info!(system = name, id = %sys.id(), "actor system started");
+        tracing::info!(target: "picard::system", system = name, id = %sys.id(), "actor system started");
 
         Ok(sys)
     }
@@ -724,7 +724,7 @@ impl ActorSystem {
     /// Panics if the temporary shutdown actor cannot be created.
     pub fn shutdown(&self) -> Shutdown {
         #[cfg(feature = "tracing")]
-        tracing::info!(system = %self.proto.name, id = %self.id(), "actor system shutting down");
+        tracing::info!(target: "picard::system", system = %self.proto.name, id = %self.id(), "actor system shutting down");
 
         let (tx, rx) = oneshot::channel::<()>();
         let tx = Arc::new(Mutex::new(Some(tx)));
@@ -1311,7 +1311,7 @@ impl Receive<ActorTerminated> for ShutdownActor {
             && let Ok(ref mut tx) = self.tx.lock()
             && let Some(tx) = tx.take()
         {
-            tx.send(()).unwrap();
+            let _ = tx.send(());
         }
     }
 }

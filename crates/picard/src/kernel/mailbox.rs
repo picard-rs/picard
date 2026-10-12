@@ -317,6 +317,7 @@ fn process_msgs<A>(
                     let (msg, sender) = (msg.msg, msg.sender);
                     #[cfg(feature = "tracing")]
                     let _span = tracing::trace_span!(
+                        target: "picard::messaging",
                         "recv",
                         actor = %ctx.myself.path(),
                         msg_type = std::any::type_name::<A::Msg>()
@@ -430,7 +431,7 @@ where
     fn drop(&mut self) {
         if thread::panicking() {
             #[cfg(feature = "tracing")]
-            tracing::error!(actor = %self.actor.path(), "actor panicked; reporting failure to parent");
+            tracing::error!(target: "picard::actor::supervision", actor = %self.actor.path(), "actor panicked; reporting failure to parent");
 
             // Suspend the mailbox to prevent further message processing
             self.mbox.set_suspended(true);

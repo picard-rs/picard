@@ -16,17 +16,22 @@ tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 let sys = ActorSystem::new().unwrap();
 ```
 
-| Level   | Kind  | Name / message                                  | Fields                         |
-| ------- | ----- | ----------------------------------------------- | ------------------------------ |
-| `INFO`  | event | `actor system started`, `actor system shutting down` | `system`, `id`            |
-| `DEBUG` | event | `actor created`                                 | `actor`, `actor_type`          |
-| `DEBUG` | event | `actor terminated`                              | `actor`                        |
-| `INFO`  | event | `actor restarted`                               | `actor`                        |
-| `WARN`  | event | `actor failed to restart`                       | `actor`                        |
-| `ERROR` | event | `actor panicked; reporting failure to parent`   | `actor`                        |
-| `WARN`  | event | `supervising failed child`                      | `supervisor`, `actor`, `strategy` |
-| `DEBUG` | event | `message could not be delivered...`             | `actor`, `msg_type` (typed sends) |
-| `TRACE` | span  | `recv`, entered while an actor handles a message | `actor`, `msg_type`           |
+Events have separate targets so subscriber filters can silence frequent lifecycle and
+message diagnostics independently of supervision events. For example, with an
+`EnvFilter`-enabled subscriber, `RUST_LOG=picard::actor::lifecycle=warn,picard::messaging=warn,picard::actor::supervision=info`
+keeps supervision warnings while reducing routine event volume.
+
+| Level   | Target                       | Kind  | Name / message                                  | Fields                         |
+| ------- | ---------------------------- | ----- | ----------------------------------------------- | ------------------------------ |
+| `INFO`  | `picard::system`             | event | `actor system started`, `actor system shutting down` | `system`, `id`            |
+| `DEBUG` | `picard::actor::lifecycle`   | event | `actor created`                                 | `actor`, `actor_type`          |
+| `DEBUG` | `picard::actor::lifecycle`   | event | `actor terminated`                              | `actor`                        |
+| `INFO`  | `picard::actor::lifecycle`   | event | `actor restarted`                               | `actor`                        |
+| `WARN`  | `picard::actor::lifecycle`   | event | `actor failed to restart`                       | `actor`                        |
+| `ERROR` | `picard::actor::supervision` | event | `actor panicked; reporting failure to parent`   | `actor`                        |
+| `WARN`  | `picard::actor::supervision` | event | `supervising failed child`                      | `supervisor`, `actor`, `strategy` |
+| `DEBUG` | `picard::messaging`          | event | `message could not be delivered...`             | `actor`, `msg_type` (typed sends) |
+| `TRACE` | `picard::messaging`          | span  | `recv`, entered while an actor handles a message | `actor`, `msg_type`           |
 
 Events raised inside an actor's `recv` (including your own `tracing` calls) are nested in its `recv` span. The `recv` span is at `TRACE` level, so filter it out in production if its per-message cost matters.
 

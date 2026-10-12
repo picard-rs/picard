@@ -19,6 +19,7 @@ use tracing::{
 #[derive(Clone, Default)]
 struct Recorder {
     events: Arc<Mutex<Vec<String>>>,
+    targets: Arc<Mutex<Vec<(&'static str, String)>>>,
     spans: Arc<Mutex<Vec<&'static str>>>,
     next_id: Arc<AtomicU64>,
 }
@@ -54,6 +55,10 @@ impl Subscriber for Recorder {
     fn event(&self, event: &Event<'_>) {
         let mut msg = String::new();
         event.record(&mut MessageVisitor(&mut msg));
+        self.targets
+            .lock()
+            .unwrap()
+            .push((event.metadata().target(), msg.clone()));
         self.events.lock().unwrap().push(msg);
     }
 
@@ -101,4 +106,15 @@ fn emits_lifecycle_events_and_recv_spans() {
     }
 
     assert!(rec.spans.lock().unwrap().contains(&"recv"));
+    let targets = rec.targets.lock().unwrap();
+    assert!(targets.contains(&("picard::system", "actor system started".into())));
+    assert!(targets.contains(&("picard::actor::lifecycle", "actor created".into())));
+    assert!(targets.contains(&(
+        "picard::actor::supervision",
+        "actor panicked; reporting failure to parent".into()
+    )));
+    assert!(targets.contains(&(
+        "picard::actor::supervision",
+        "supervising failed child".into()
+    )));
 }

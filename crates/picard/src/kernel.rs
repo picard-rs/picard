@@ -90,6 +90,7 @@ where
     sys.stats_recorder().actor_created();
     #[cfg(feature = "tracing")]
     tracing::debug!(
+        target: "picard::actor::lifecycle",
         actor = %actor_ref.path(),
         actor_type = std::any::type_name::<A>(),
         "actor created"
@@ -145,12 +146,12 @@ fn restart_actor<A>(
         #[cfg(feature = "stats")]
         sys.stats_recorder().actor_restarted();
         #[cfg(feature = "tracing")]
-        tracing::info!(actor = %actor_ref.path(), "actor restarted");
+        tracing::info!(target: "picard::actor::lifecycle", actor = %actor_ref.path(), "actor restarted");
         actor_ref.send_system_message(SystemMsg::ActorInit);
         sys.publish_event(ActorRestarted { actor: actor_ref }.into());
     } else {
         #[cfg(feature = "tracing")]
-        tracing::warn!(actor = %actor_ref.path(), "actor failed to restart");
+        tracing::warn!(target: "picard::actor::lifecycle", actor = %actor_ref.path(), "actor failed to restart");
         warn!(sys.log(), "Actor failed to restart: {:?}", actor_ref);
     }
 }
@@ -163,7 +164,7 @@ where
     #[cfg(feature = "stats")]
     sys.stats_recorder().actor_terminated();
     #[cfg(feature = "tracing")]
-    tracing::debug!(actor = %actor_ref.path(), "actor terminated");
+    tracing::debug!(target: "picard::actor::lifecycle", actor = %actor_ref.path(), "actor terminated");
     flush_to_deadletters(mbox, &actor_ref, sys);
     sys.publish_event(
         ActorTerminated {
