@@ -1,6 +1,10 @@
 //! Messages exchanged between the simulation actors.
 
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt,
+    sync::Arc,
+};
 
 use picard::platform::Instant;
 
@@ -62,6 +66,60 @@ pub struct InspectReq {
 pub struct Directory {
     pub version: u64,
     pub junctions: HashMap<Node, ActorRef<JunctionMsg>>,
+    /// Districts that run in other processes. Their junctions can be routed through, but
+    /// vehicles must be handed over to reach them.
+    pub remote: HashSet<usize>,
+}
+
+impl Directory {
+    #[must_use]
+    pub fn is_remote(&self, node: Node) -> bool {
+        self.remote.contains(&node.district())
+    }
+
+    /// Whether a junction exists at `node`, locally or in a remote district.
+    #[must_use]
+    pub fn has(&self, node: Node) -> bool {
+        self.junctions.contains_key(&node) || self.is_remote(node)
+    }
+}
+
+/// Everything a vehicle carries when it drives into a district of another process.
+///
+/// The vehicle is at `from` (a node of the sender) and about to drive the edge to `to`
+/// (a node of the receiver).
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VehicleTransfer {
+    pub id: VehicleId,
+    /// Number of hand-overs so far; keeps actor names unique when a vehicle returns.
+    pub hop: u32,
+    pub from: Node,
+    pub to: Node,
+    pub dest: Node,
+    pub route: VecDeque<Node>,
+    pub speed: f32,
+    pub trips: u32,
+}
+
+impl VehicleTransfer {
+    const MAX_ROUTE: usize = 512;
+
+    /// Checks data that arrived over the network before it is turned into an actor.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        let in_city = |n: Node| Node::in_city(i32::from(n.x), i32::from(n.y));
+        let step = (i32::from(self.from.x) - i32::from(self.to.x)).abs()
+            + (i32::from(self.from.y) - i32::from(self.to.y)).abs();
+        in_city(self.from)
+            && in_city(self.to)
+            && in_city(self.dest)
+            && step == 1
+            && self.route.len() <= Self::MAX_ROUTE
+            && self.route.iter().all(|n| in_city(*n))
+            && self.speed.is_finite()
+            && (0.1..=10.0).contains(&self.speed)
+    }
 }
 
 impl fmt::Debug for Directory {
@@ -160,6 +218,8 @@ pub enum DistrictMsg {
     Directory(Arc<Directory>),
     #[cfg_attr(feature = "serde", serde(skip))]
     NeedDirectory(ActorRef<VehicleMsg>),
+    /// A vehicle driving in from a district of another process.
+    VehicleArrival(VehicleTransfer),
     SetTarget(usize),
     Surge(usize),
     VehicleReport(VehicleView),
@@ -207,6 +267,9 @@ pub enum SupervisorMsg {
     Inspect {
         id: String,
     },
+    /// The districts that currently run in other processes.
+    RemoteDistricts(Vec<usize>),
+    VehicleArrival(VehicleTransfer),
 }
 
 #[derive(Clone, Debug)]
@@ -227,8 +290,16 @@ pub enum GatewayMsg {
         paused: bool,
         target: usize,
     },
+    /// A vehicle leaves for a district of another process.
+    Migrate {
+        district: usize,
+        transfer: VehicleTransfer,
+    },
     #[cfg(feature = "remoting")]
     Heartbeat,
+    #[cfg(feature = "remoting")]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    SetSupervisor(ActorRef<SupervisorMsg>),
     #[cfg(feature = "remoting")]
     RemoteUpdate(RemoteUpdate),
     #[cfg(feature = "remoting")]

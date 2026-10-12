@@ -79,6 +79,11 @@ impl Sim {
             )
             .map_err(|e| e.to_string())?;
         metrics.add(&metrics.created, 3);
+        #[cfg(feature = "remoting")]
+        gateway.tell(
+            crate::msg::GatewayMsg::SetSupervisor(supervisor.clone()),
+            None,
+        );
         Ok(Self {
             system,
             supervisor,

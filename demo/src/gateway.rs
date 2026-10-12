@@ -6,9 +6,14 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 #[cfg(feature = "remoting")]
+use std::collections::BTreeSet;
+
+#[cfg(feature = "remoting")]
 use picard::platform::Instant;
 
 use picard::actors::{Actor, ActorFactoryArgs, Context, Sender, Timer};
+#[cfg(feature = "remoting")]
+use picard::actors::{ActorRef, Tell};
 use tokio::sync::watch;
 
 use crate::{
@@ -18,8 +23,8 @@ use crate::{
 };
 #[cfg(feature = "remoting")]
 use crate::{
-    msg::RemoteUpdate,
-    remoting::{GATEWAY_PATH, PeerLink},
+    msg::{RemoteUpdate, SupervisorMsg},
+    remoting::{GATEWAY_PATH, PeerLink, SUPERVISOR_PATH},
     sampler::Sampler,
 };
 
@@ -70,6 +75,10 @@ pub struct Gateway {
     last_seen: BTreeMap<usize, Instant>,
     #[cfg(feature = "remoting")]
     sampler: Option<Sampler>,
+    #[cfg(feature = "remoting")]
+    supervisor: Option<ActorRef<SupervisorMsg>>,
+    #[cfg(feature = "remoting")]
+    announced_remote: BTreeSet<usize>,
 }
 
 impl ActorFactoryArgs<GatewayArgs> for Gateway {
@@ -96,6 +105,10 @@ impl ActorFactoryArgs<GatewayArgs> for Gateway {
             last_seen: BTreeMap::new(),
             #[cfg(feature = "remoting")]
             sampler: None,
+            #[cfg(feature = "remoting")]
+            supervisor: None,
+            #[cfg(feature = "remoting")]
+            announced_remote: BTreeSet::new(),
         }
     }
 }
@@ -207,6 +220,17 @@ impl Gateway {
                     });
                 }
             }
+            GatewayMsg::Migrate { district, transfer } => {
+                #[cfg(feature = "remoting")]
+                self.forward_vehicle(district, transfer);
+                #[cfg(not(feature = "remoting"))]
+                let _ = (district, transfer);
+            }
+            #[cfg(feature = "remoting")]
+            GatewayMsg::SetSupervisor(supervisor) => {
+                self.supervisor = Some(supervisor);
+                self.announce_remote_districts();
+            }
             #[cfg(feature = "remoting")]
             GatewayMsg::Heartbeat => {
                 if let (Some(district), Some(sampler)) = (self.args.district, &mut self.sampler) {
@@ -252,6 +276,7 @@ impl Gateway {
         match update {
             RemoteUpdate::Metrics { district, sample } => {
                 self.remote_samples.insert(district, sample);
+                return;
             }
             RemoteUpdate::Snapshot(snapshot) => {
                 self.generations
@@ -274,6 +299,7 @@ impl Gateway {
                 self.recompute_status();
             }
         }
+        self.announce_remote_districts();
     }
 
     #[cfg(feature = "remoting")]
@@ -292,6 +318,52 @@ impl Gateway {
             self.apply_district_gone(district);
         }
         self.recompute_status();
+        self.announce_remote_districts();
+    }
+
+    /// Tells the supervisor which districts live in other processes, so vehicles can route
+    /// into them.
+    #[cfg(feature = "remoting")]
+    fn announce_remote_districts(&mut self) {
+        let Some(supervisor) = &self.supervisor else {
+            return;
+        };
+        let remote: BTreeSet<usize> = self
+            .generations
+            .keys()
+            .copied()
+            .filter(|district| Some(*district) != self.args.district)
+            .filter(|district| {
+                self.remote_peers
+                    .iter()
+                    .any(|peer| peer.district == *district)
+            })
+            .collect();
+        if remote != self.announced_remote {
+            supervisor.tell(
+                SupervisorMsg::RemoteDistricts(remote.iter().copied().collect()),
+                None,
+            );
+            self.announced_remote = remote;
+        }
+    }
+
+    #[cfg(feature = "remoting")]
+    fn forward_vehicle(&self, district: usize, transfer: crate::msg::VehicleTransfer) {
+        let Some(peer) = self
+            .remote_peers
+            .iter()
+            .find(|peer| peer.district == district)
+        else {
+            eprintln!(
+                "dropping vehicle {}: district {district} is not connected",
+                transfer.id
+            );
+            return;
+        };
+        if let Err(err) = peer.send(SUPERVISOR_PATH, &SupervisorMsg::VehicleArrival(transfer)) {
+            eprintln!("cannot hand vehicle to district {district}: {err}");
+        }
     }
 
     #[cfg(feature = "remoting")]

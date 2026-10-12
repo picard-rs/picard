@@ -50,10 +50,14 @@ The transport is plain WebSocket by default. Use a private/trusted network or
 terminate TLS at a trusted reverse proxy and secure the proxy-to-process path.
 All peers configured as outgoing connections are allow-listed by the same
 shared bearer token. A process needs a peer entry for every other process for
-the mesh to exchange commands and snapshots. In this demo slice each district
-owns and simulates its local junctions and vehicles; direct vehicle crossing
-between remote district actors and transparent remote `ActorRef`s are not yet
-implemented.
+the mesh to exchange commands and snapshots. Each district
+owns and simulates its local junctions and vehicles. When a vehicle's next
+hop lies in a district of another process, it migrates: it sends a
+`VehicleTransfer` (route, speed, trip count) to the remote supervisor and
+stops, and the remote district spawns a continuing vehicle on that edge.
+Vehicles in flight to a district that goes down are lost, and district
+populations drift from their target as vehicles migrate. Transparent remote
+`ActorRef`s are not implemented.
 
 With [just](https://just.systems), run these from `demo/`: `just up` creates a
 git-ignored `.env` with a random shared token (if missing) and starts the
