@@ -208,16 +208,21 @@ impl BasicActorRef {
     ///
     /// # Errors
     ///
-    /// Returns `AnyEnqueueError` if the actor does not accept `Msg` or its
-    /// mailbox no longer accepts messages.
+    /// Returns `AnyEnqueueError` if the actor does not accept `Msg`, the
+    /// message cannot be serialized for a remote reply reference, or the
+    /// recipient no longer accepts messages.
     pub fn try_tell<Msg>(
         &self,
         msg: Msg,
         sender: impl Into<Option<Self>>,
     ) -> Result<(), AnyEnqueueError>
     where
-        Msg: LocalMessage + Send,
+        Msg: Message + Send,
     {
+        #[cfg(feature = "remoting")]
+        if let Some(result) = self.cell.send_remote_reply(&msg) {
+            return result;
+        }
         self.try_tell_any(&mut AnyMessage::new(msg), sender)
     }
 
@@ -232,6 +237,10 @@ impl BasicActorRef {
         msg: &mut AnyMessage,
         sender: impl Into<Option<Self>>,
     ) -> Result<(), AnyEnqueueError> {
+        #[cfg(feature = "remoting")]
+        if self.cell.is_remote_reply() {
+            return Err(AnyEnqueueError);
+        }
         self.cell.send_any_msg(msg, sender.into())
     }
 }
@@ -288,6 +297,10 @@ impl ActorReference for BasicActorRef {
 
 impl SystemTell for BasicActorRef {
     fn send_system_message(&self, msg: SystemMsg) {
+        #[cfg(feature = "remoting")]
+        if self.cell.is_remote_reply() {
+            return;
+        }
         let envelope = Envelope { msg, sender: None };
         let _ = self.cell.send_sys_msg(envelope);
     }
@@ -298,22 +311,22 @@ impl ActorReference for &BasicActorRef {
     ///
     /// Unique among siblings.
     fn name(&self) -> &str {
-        self.cell.uri().name.as_ref()
+        (**self).name()
     }
 
     fn uri(&self) -> &ActorUri {
-        self.cell.uri()
+        (**self).uri()
     }
 
     /// Actor path.
     ///
     /// e.g. `/user/actor_a/actor_b`
     fn path(&self) -> &ActorPath {
-        &self.cell.uri().path
+        (**self).path()
     }
 
     fn is_root(&self) -> bool {
-        self.cell.is_root()
+        (**self).is_root()
     }
 
     /// Parent reference.
@@ -326,16 +339,16 @@ impl ActorReference for &BasicActorRef {
     }
 
     fn has_children(&self) -> bool {
-        self.cell.has_children()
+        (**self).has_children()
     }
 
     fn is_child(&self, actor: &BasicActorRef) -> bool {
-        self.cell.is_child(actor)
+        (**self).is_child(actor)
     }
 
     /// Iterator over children references.
     fn children<'a>(&'a self) -> Box<dyn Iterator<Item = BasicActorRef> + 'a> {
-        self.cell.children()
+        (**self).children()
     }
 
     fn stop(&self) {
@@ -345,26 +358,25 @@ impl ActorReference for &BasicActorRef {
 
 impl SystemTell for &BasicActorRef {
     fn send_system_message(&self, msg: SystemMsg) {
-        let envelope = Envelope { msg, sender: None };
-        let _ = self.cell.send_sys_msg(envelope);
+        (**self).send_system_message(msg);
     }
 }
 
 impl fmt::Debug for BasicActorRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BasicActorRef[{:?}]", self.cell.uri())
+        write!(f, "BasicActorRef[{:?}]", self.uri())
     }
 }
 
 impl fmt::Display for BasicActorRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BasicActorRef[{}]", self.cell.uri())
+        write!(f, "BasicActorRef[{}]", self.uri())
     }
 }
 
 impl PartialEq for BasicActorRef {
     fn eq(&self, other: &Self) -> bool {
-        self.cell.uri().path == other.cell.uri().path
+        self.path() == other.path()
     }
 }
 

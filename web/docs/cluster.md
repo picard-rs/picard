@@ -60,13 +60,30 @@ does not mean the actor has processed the message. Unknown actors, invalid
 payloads, unsupported protocol versions, failed authentication, and transport
 errors are reported to the caller.
 
-The first API is deliberately explicit: callers construct a remote address and
-serialize the message, while local `ActorRef` values retain their existing
-behavior. A request cannot yet carry a remote sender into an actor's `Sender`;
-`listen_remote_actors` rejects requests that include one. Application-defined
-request/reply exchanges can instead use `listen_remote` with a custom
-`RemoteHandler`, which returns a `RemoteResponse` (including an optional reply
-payload).
+Use `RemoteConnection::ask` when the actor must reply through the usual
+`Sender`:
+
+```rust,ignore
+let reply: String = remote
+    .ask(address, request, std::time::Duration::from_secs(2))
+    .await?;
+```
+
+The destination actor receives a temporary `BasicActorRef` as its `Sender`;
+the first serializable message it sends through that reference is returned to
+the caller. This temporary reference supports typed `try_tell` replies; it
+does not support watches, system messages, or type-erased `try_tell_any`. A
+reply received after the timeout is rejected. If the actor drops its sender
+without replying, the call returns `RemoteError::NoReply`; if no reply arrives
+before the deadline, it returns `RemoteError::Timeout`. A connection or peer
+failure is reported as `RemoteError::Transport`. The ask timeout bounds the
+remote actor's reply wait after the request reaches its system; transport
+setup failures are reported separately. Timeouts are limited to 60 seconds to
+bound the time a listener worker waits on any one request.
+
+`send` remains fire-and-forget with a mailbox-acceptance acknowledgment.
+Application-defined exchanges may also use `listen_remote` with a custom
+`RemoteHandler`, which can return a `RemoteResponse` payload.
 
 ## Custom transports
 
@@ -79,7 +96,7 @@ handler interface as the built-in WebSocket transport.
 
 ## Protocol and security boundaries
 
-- The first protocol uses versioned JSON messages and limits frames to 1 MiB.
+- Protocol version 2 uses JSON messages and limits frames to 1 MiB.
 - Peer bearer tokens are sent in the HTTP upgrade `Authorization` header, not
   in URLs, and are redacted from `Debug` output.
 - Use `wss://` or a private network for transport confidentiality and integrity.
@@ -89,8 +106,8 @@ handler interface as the built-in WebSocket transport.
 - A disconnect can leave the caller uncertain whether the remote mailbox
   accepted a message. The protocol does not promise exactly-once delivery.
 - The built-in transport opens a WebSocket connection per send. Connection
-  pooling, retries, discovery, lifecycle management, and remote actor replies
-  are future work.
+  pooling, retries, discovery, and remote peer lifecycle management are future
+  work.
 
 WebSockets are a pragmatic fit when deployments already use HTTP reverse
 proxies for TLS termination. Compared with a raw TCP protocol, they provide

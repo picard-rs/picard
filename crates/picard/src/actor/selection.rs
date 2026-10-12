@@ -1,5 +1,4 @@
 use crate::{
-    LocalMessage,
     actor::{ActorReference, BasicActorRef},
     validate::{InvalidPath, validate_path},
 };
@@ -83,7 +82,7 @@ impl ActorSelection {
         sender: impl Into<Option<BasicActorRef>>,
     ) -> Result<usize, SelectionSendError>
     where
-        Msg: LocalMessage + Clone,
+        Msg: crate::Message + Clone,
     {
         fn walk(
             anchor: &BasicActorRef,

@@ -48,6 +48,8 @@ struct ActorCellInner {
     system: ActorSystem,
     mailbox: Arc<dyn AnySender>,
     sys_mailbox: MailboxSender<SystemMsg>,
+    #[cfg(feature = "remoting")]
+    remote_reply: Option<Arc<std::sync::mpsc::SyncSender<serde_json::Value>>>,
 }
 
 impl ActorCell {
@@ -70,8 +72,49 @@ impl ActorCell {
                 system: system.clone(),
                 mailbox,
                 sys_mailbox,
+                #[cfg(feature = "remoting")]
+                remote_reply: None,
             }),
         }
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn with_remote_reply(
+        &self,
+        uri: ActorUri,
+        sender: std::sync::mpsc::SyncSender<serde_json::Value>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(ActorCellInner {
+                uri,
+                parent: Some(self.myself()),
+                children: Children::new(),
+                is_terminating: AtomicBool::new(false),
+                is_restarting: AtomicBool::new(false),
+                kernel: OnceLock::new(),
+                system: self.inner.system.clone(),
+                mailbox: self.inner.mailbox.clone(),
+                sys_mailbox: self.inner.sys_mailbox.clone(),
+                remote_reply: Some(Arc::new(sender)),
+            }),
+        }
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn send_remote_reply<Msg: Message>(
+        &self,
+        msg: &Msg,
+    ) -> Option<Result<(), AnyEnqueueError>> {
+        self.inner.remote_reply.as_ref().map(|sender| {
+            serde_json::to_value(msg)
+                .map_err(|_| AnyEnqueueError)
+                .and_then(|payload| sender.send(payload).map_err(|_| AnyEnqueueError))
+        })
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn is_remote_reply(&self) -> bool {
+        self.inner.remote_reply.is_some()
     }
 
     pub(crate) fn init(self, kernel: &KernelRef) -> Self {
@@ -85,7 +128,7 @@ impl ActorCell {
     }
 
     pub(crate) fn myself(&self) -> BasicActorRef {
-        BasicActorRef { cell: self.clone() }
+        BasicActorRef::new(self.clone())
     }
 
     pub(crate) fn uri(&self) -> &ActorUri {
@@ -121,6 +164,10 @@ impl ActorCell {
         msg: &mut AnyMessage,
         sender: crate::actor::Sender,
     ) -> Result<(), AnyEnqueueError> {
+        #[cfg(feature = "remoting")]
+        if self.is_remote_reply() {
+            return Err(AnyEnqueueError);
+        }
         let mb = &self.inner.mailbox;
         let k = self.kernel();
 
@@ -135,6 +182,10 @@ impl ActorCell {
     }
 
     pub(crate) fn send_sys_msg(&self, msg: Envelope<SystemMsg>) -> MsgResult<Envelope<SystemMsg>> {
+        #[cfg(feature = "remoting")]
+        if self.is_remote_reply() {
+            return Err(crate::actor::MsgError::new(msg));
+        }
         let mb = &self.inner.sys_mailbox;
 
         let k = self.kernel();
@@ -336,6 +387,8 @@ where
                 system: system.clone(),
                 mailbox: any_mailbox,
                 sys_mailbox,
+                #[cfg(feature = "remoting")]
+                remote_reply: None,
             }),
         };
 

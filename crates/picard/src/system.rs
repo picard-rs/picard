@@ -471,7 +471,7 @@ impl ActorSystem {
         peer: crate::remoting::RemotePeer,
         transport: std::sync::Arc<dyn crate::remoting::RemoteTransport>,
     ) -> crate::remoting::RemoteConnection {
-        crate::remoting::RemoteConnection::with_transport(peer, transport)
+        crate::remoting::RemoteConnection::with_transport_and_system_id(peer, transport, self.id())
     }
 
     /// Listen for authenticated remote requests using the built-in WebSocket
@@ -503,18 +503,19 @@ impl ActorSystem {
     }
 
     /// Build a handler that dispatches authenticated requests to actors in
-    /// this system. Remote sender addresses are not yet routed to actor
-    /// `Sender` values and are rejected.
+    /// this system, including typed replies for remote asks.
     #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
     #[must_use]
     pub fn remote_handler(&self) -> crate::remoting::RemoteHandler {
         let provider = self.provider.clone();
-        let system_id = self.id();
+        let system = self.clone();
         std::sync::Arc::new(move |_, request| {
-            let result = provider.dispatch_remote(system_id, &request);
+            let id = request.id;
+            let result = provider.dispatch_remote(&system, &request);
             match result {
-                Ok(()) => crate::remoting::RemoteResponse::accepted(request.id),
-                Err(error) => crate::remoting::RemoteResponse::rejected(request.id, error),
+                Ok(Some(payload)) => crate::remoting::RemoteResponse::replied(id, payload),
+                Ok(None) => crate::remoting::RemoteResponse::accepted(id),
+                Err(error) => crate::remoting::RemoteResponse::rejected(id, error),
             }
         })
     }

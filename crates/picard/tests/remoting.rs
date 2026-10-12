@@ -2,14 +2,15 @@
 
 use picard::{
     actors::{
-        Actor, ActorFactoryArgs, ActorRefFactory, ActorReference, ActorSystem, Context, Sender,
+        Actor, ActorFactoryArgs, ActorRefFactory, ActorReference, ActorSystem, BasicActorRef,
+        Context, Sender,
     },
     remoting::{ActorAddress, PeerAuthenticator, RemotePeer},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     sync::mpsc::{self, Sender as ChannelSender},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -29,6 +30,43 @@ impl Actor for Recorder {
     fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
         let _ = self.0.send(msg);
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct AskMessage(String);
+
+#[derive(Default)]
+struct Echo;
+
+impl Actor for Echo {
+    type Msg = AskMessage;
+
+    fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, sender: Sender) {
+        sender
+            .expect("remote ask sender")
+            .try_tell(format!("reply: {}", msg.0), None)
+            .expect("reply should be accepted");
+    }
+}
+
+#[derive(Default)]
+struct Silent(Option<BasicActorRef>);
+
+impl Actor for Silent {
+    type Msg = AskMessage;
+
+    fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, sender: Sender) {
+        self.0 = sender;
+    }
+}
+
+#[derive(Default)]
+struct DropsReply;
+
+impl Actor for DropsReply {
+    type Msg = AskMessage;
+
+    fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {}
 }
 
 #[test]
@@ -65,4 +103,142 @@ fn websocket_remoting_routes_a_serialized_message_to_an_actor() {
     assert!(response.accepted);
     assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), sent);
     listener.shutdown();
+}
+
+#[test]
+fn websocket_remoting_supports_typed_remote_ask() {
+    let caller = ActorSystem::new().unwrap();
+    let receiver = ActorSystem::new().unwrap();
+    let actor = receiver.actor_of::<Echo>("echo").unwrap();
+    let listener = receiver
+        .listen_remote_actors(
+            "127.0.0.1:0".parse().unwrap(),
+            PeerAuthenticator::new([("caller".into(), "ask-token".into())]),
+        )
+        .unwrap();
+    let endpoint = format!(
+        "ws://{}/remoting",
+        listener.local_addr().expect("WebSocket listener address")
+    );
+    let remote =
+        caller.connect_remote(RemotePeer::new("receiver", endpoint.clone(), "ask-token").unwrap());
+    let destination = ActorAddress::remote(receiver.id(), endpoint, actor.path().to_string());
+
+    let reply = futures::executor::block_on(remote.ask::<_, String>(
+        destination,
+        AskMessage("hello".into()),
+        Duration::from_secs(1),
+    ))
+    .unwrap();
+
+    assert_eq!(reply, "reply: hello");
+    listener.shutdown();
+}
+
+#[test]
+fn websocket_remoting_times_out_when_remote_actor_does_not_reply() {
+    let caller = ActorSystem::new().unwrap();
+    let receiver = ActorSystem::new().unwrap();
+    let actor = receiver.actor_of::<Silent>("silent").unwrap();
+    let listener = receiver
+        .listen_remote_actors(
+            "127.0.0.1:0".parse().unwrap(),
+            PeerAuthenticator::new([("caller".into(), "ask-token".into())]),
+        )
+        .unwrap();
+    let endpoint = format!(
+        "ws://{}/remoting",
+        listener.local_addr().expect("WebSocket listener address")
+    );
+    let remote =
+        caller.connect_remote(RemotePeer::new("receiver", endpoint.clone(), "ask-token").unwrap());
+    let destination = ActorAddress::remote(receiver.id(), endpoint, actor.path().to_string());
+
+    let started = Instant::now();
+    let result = futures::executor::block_on(remote.ask::<_, String>(
+        destination,
+        AskMessage("no reply".into()),
+        Duration::from_millis(20),
+    ));
+    let elapsed = started.elapsed();
+
+    assert!(
+        matches!(result, Err(picard::remoting::RemoteError::Timeout)),
+        "unexpected result: {result:?}"
+    );
+    assert!(elapsed >= Duration::from_millis(15), "elapsed: {elapsed:?}");
+    listener.shutdown();
+}
+
+#[test]
+fn websocket_remoting_reports_a_dropped_reply_sender() {
+    let caller = ActorSystem::new().unwrap();
+    let receiver = ActorSystem::new().unwrap();
+    let actor = receiver.actor_of::<DropsReply>("drops-reply").unwrap();
+    let listener = receiver
+        .listen_remote_actors(
+            "127.0.0.1:0".parse().unwrap(),
+            PeerAuthenticator::new([("caller".into(), "ask-token".into())]),
+        )
+        .unwrap();
+    let endpoint = format!(
+        "ws://{}/remoting",
+        listener.local_addr().expect("WebSocket listener address")
+    );
+    let remote =
+        caller.connect_remote(RemotePeer::new("receiver", endpoint.clone(), "ask-token").unwrap());
+    let destination = ActorAddress::remote(receiver.id(), endpoint, actor.path().to_string());
+
+    let result = futures::executor::block_on(remote.ask::<_, String>(
+        destination,
+        AskMessage("drop sender".into()),
+        Duration::from_secs(1),
+    ));
+
+    assert!(matches!(
+        result,
+        Err(picard::remoting::RemoteError::NoReply)
+    ));
+    listener.shutdown();
+}
+
+#[test]
+fn websocket_remoting_returns_a_transport_error_for_an_unreachable_peer() {
+    let caller = ActorSystem::new().unwrap();
+    let unavailable = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = unavailable.local_addr().unwrap();
+    drop(unavailable);
+    let endpoint = format!("ws://{address}/remoting");
+    let remote = caller
+        .connect_remote(RemotePeer::new("unreachable", endpoint.clone(), "unused-token").unwrap());
+
+    let result = futures::executor::block_on(remote.ask::<_, String>(
+        ActorAddress::remote(caller.id(), endpoint, "/user/missing"),
+        AskMessage("unreachable".into()),
+        Duration::from_secs(1),
+    ));
+
+    assert!(matches!(
+        result,
+        Err(picard::remoting::RemoteError::Transport(_))
+    ));
+}
+
+#[test]
+fn websocket_remoting_rejects_timeouts_over_sixty_seconds() {
+    let caller = ActorSystem::new().unwrap();
+    let remote = caller.connect_remote(
+        RemotePeer::new("unreachable", "ws://127.0.0.1:1/remoting", "unused-token").unwrap(),
+    );
+
+    let result = futures::executor::block_on(remote.ask::<_, String>(
+        ActorAddress::local(caller.id(), "/user/missing"),
+        AskMessage("too long".into()),
+        Duration::from_secs(61),
+    ));
+
+    assert!(matches!(
+        result,
+        Err(picard::remoting::RemoteError::TimeoutTooLong)
+    ));
 }

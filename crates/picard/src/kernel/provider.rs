@@ -33,8 +33,11 @@ struct ProviderInner {
 }
 
 #[cfg(feature = "remoting")]
-type RemoteDispatcher =
-    Arc<dyn Fn(serde_json::Value) -> Result<(), crate::remoting::RemoteError> + Send + Sync>;
+type RemoteDispatcher = Arc<
+    dyn Fn(serde_json::Value, Option<BasicActorRef>) -> Result<(), crate::remoting::RemoteError>
+        + Send
+        + Sync,
+>;
 
 impl Provider {
     pub fn new() -> Self {
@@ -172,11 +175,11 @@ impl Provider {
         let target = BasicActorRef::from(actor);
         self.inner.remote_dispatchers.insert(
             path,
-            Arc::new(move |payload| {
+            Arc::new(move |payload, sender| {
                 let msg = serde_json::from_value::<Msg>(payload)
                     .map_err(|err| crate::remoting::RemoteError::InvalidMessage(err.to_string()))?;
                 target
-                    .try_tell(msg, None)
+                    .try_tell(msg, sender)
                     .map_err(|err| crate::remoting::RemoteError::Rejected(format!("{err:?}")))
             }),
         );
@@ -185,25 +188,67 @@ impl Provider {
     #[cfg(feature = "remoting")]
     pub(crate) fn dispatch_remote(
         &self,
-        system_id: uuid::Uuid,
+        system: &ActorSystem,
         request: &crate::remoting::RemoteRequest,
-    ) -> Result<(), crate::remoting::RemoteError> {
-        if request.destination.system_id != system_id {
+    ) -> Result<Option<serde_json::Value>, crate::remoting::RemoteError> {
+        if request.destination.system_id != system.id() {
             return Err(crate::remoting::RemoteError::Rejected(
                 "destination system ID does not match this system".into(),
             ));
         }
-        if request.sender.is_some() {
+        if request.sender.is_some() != request.reply_timeout_ms.is_some() {
             return Err(crate::remoting::RemoteError::UnsupportedSender);
         }
+        if request
+            .reply_timeout_ms
+            .is_some_and(|timeout_ms| timeout_ms > crate::remoting::MAX_REMOTE_ASK_TIMEOUT_MS)
+        {
+            return Err(crate::remoting::RemoteError::TimeoutTooLong);
+        }
+
+        let (reply_sender, reply_receiver) = if let Some(address) = &request.sender {
+            if address.endpoint.is_some() {
+                return Err(crate::remoting::RemoteError::UnsupportedSender);
+            }
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            let name = address.path.rsplit('/').next().unwrap_or("remote-ask");
+            let uri = ActorUri {
+                name: Arc::from(name),
+                path: ActorPath::new(&address.path),
+                host: Arc::from(address.system_id.to_string()),
+            };
+            (
+                Some(BasicActorRef::new(
+                    system.temp_root().cell.with_remote_reply(uri, sender),
+                )),
+                Some(receiver),
+            )
+        } else {
+            (None, None)
+        };
         let path = ActorPath::new(&request.destination.path);
-        self.inner
+        let dispatcher = self
+            .inner
             .remote_dispatchers
             .get(&path)
             .map(|dispatcher| dispatcher.clone())
-            .ok_or_else(|| crate::remoting::RemoteError::ActorNotFound(path.to_string()))?(
-            request.payload.clone(),
-        )
+            .ok_or_else(|| crate::remoting::RemoteError::ActorNotFound(path.to_string()))?;
+        dispatcher(request.payload.clone(), reply_sender)?;
+        match (reply_receiver, request.reply_timeout_ms) {
+            (Some(receiver), Some(timeout_ms)) => receiver
+                .recv_timeout(std::time::Duration::from_millis(timeout_ms))
+                .map(Some)
+                .map_err(|error| match error {
+                    std::sync::mpsc::RecvTimeoutError::Timeout => {
+                        crate::remoting::RemoteError::Timeout
+                    }
+                    std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                        crate::remoting::RemoteError::NoReply
+                    }
+                }),
+            (None, None) => Ok(None),
+            _ => Err(crate::remoting::RemoteError::UnsupportedSender),
+        }
     }
 
     #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
