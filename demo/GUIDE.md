@@ -46,6 +46,23 @@ cargo run -p living-city --release --features console,serde -- \
   loadtest --vehicles 1000,5000 --secs 20 --console-listen 127.0.0.1:9000
 ```
 
+Instead of a separate port, `--console-route` (or `PICARD_CONSOLE_ROUTE=true`)
+serves the console at `/console` on the web server itself, routing requests
+through Picard's transport-agnostic `ActorSystem::console()` service:
+
+```sh
+cargo run -p living-city --release --features console,serde -- --console-route
+cargo run -p picard-console -- ws://127.0.0.1:8080/console
+```
+
+The route requires the same token, a loopback `--host`, and the web server (it
+cannot be combined with `loadtest`). It rejects browser upgrades carrying an
+`Origin` header, limits request sizes, and allows 16 concurrent clients. Both
+endpoints can be enabled together.
+
+If `picard-console` reports `Unable to connect`, no endpoint is listening: build
+with `--features console` and pass `--console-listen` or `--console-route`.
+
 The console handle remains alive for the whole server or load-test run. Startup
 and shutdown errors are reported, and the listener and actor system are stopped
 when the run finishes. The runtime console is separate from the browser's `/ws`

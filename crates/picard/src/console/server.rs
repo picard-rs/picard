@@ -17,11 +17,10 @@ use tungstenite::{
     protocol::WebSocketConfig,
 };
 
-use super::{ConsoleError, Request, Response};
+use super::{ConsoleError, MAX_REQUEST_BYTES, Response, is_valid_token};
 use crate::system::{ActorSystem, LoggingSystem};
 
 const MAX_CONNECTIONS: usize = 16;
-const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Options for an explicitly started console. Only loopback addresses are accepted.
@@ -84,12 +83,7 @@ impl ActorSystem {
                 "Console must bind to loopback",
             ));
         }
-        if options.token.len() < 32
-            || !options
-                .token
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-        {
+        if !is_valid_token(&options.token) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Console token must contain at least 32 ASCII letters, digits, '-' or '_'",
@@ -175,6 +169,7 @@ fn client(
 ) -> Result<(), Box<dyn std::error::Error>> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    let console = system.console();
     let authorization = format!("Bearer {token}");
     // Tungstenite fixes the callback's error type to an HTTP response.
     #[allow(clippy::result_large_err)]
@@ -202,8 +197,8 @@ fn client(
         }
     };
     let config = WebSocketConfig::default()
-        .max_message_size(Some(MAX_MESSAGE_BYTES))
-        .max_frame_size(Some(MAX_MESSAGE_BYTES))
+        .max_message_size(Some(MAX_REQUEST_BYTES))
+        .max_frame_size(Some(MAX_REQUEST_BYTES))
         .write_buffer_size(0)
         .max_write_buffer_size(1024 * 1024);
     let mut socket = accept_hdr_with_config(stream, callback, Some(config))?;
@@ -211,19 +206,18 @@ fn client(
     while !stop.load(Ordering::Acquire) {
         match socket.read() {
             Ok(Message::Text(text)) => {
-                let response = handle_text(system, &text);
-                write_response(&mut socket, &response)?;
+                write_response(&mut socket, console.handle_text(&text))?;
             }
             Ok(Message::Binary(_)) => write_response(
                 &mut socket,
-                &Response {
-                    id: None,
-                    result: None,
-                    error: Some(ConsoleError::new(
+                Response::from_result(
+                    None,
+                    Err(ConsoleError::new(
                         "invalid_request",
                         "Requests must be JSON text frames",
                     )),
-                },
+                )
+                .to_json(),
             )?,
             Ok(Message::Close(_)) | Err(Error::ConnectionClosed | Error::AlreadyClosed) => {
                 return Ok(());
@@ -244,44 +238,8 @@ fn client(
 
 fn write_response(
     socket: &mut WebSocket<TcpStream>,
-    response: &Response,
+    text: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut text = serde_json::to_string(response)?;
-    if text.len() > 1024 * 1024 - 1024 {
-        text = serde_json::to_string(&Response {
-            id: response.id,
-            result: None,
-            error: Some(ConsoleError::new(
-                "response_too_large",
-                "Response exceeds one MiB; request a smaller actor page",
-            )),
-        })?;
-    }
     socket.send(Message::Text(text.into()))?;
     Ok(())
-}
-
-fn handle_text(system: &ActorSystem, text: &str) -> Response {
-    let parsed = serde_json::from_str::<serde_json::Value>(text);
-    let id = parsed
-        .as_ref()
-        .ok()
-        .and_then(|value| value.get("id"))
-        .and_then(serde_json::Value::as_u64);
-    let result = parsed
-        .and_then(serde_json::from_value::<Request>)
-        .map_err(|err| ConsoleError::new("invalid_request", err.to_string()))
-        .and_then(|request| system.provider.console().execute(request.command));
-    match result {
-        Ok(result) => Response {
-            id,
-            result: Some(result),
-            error: None,
-        },
-        Err(error) => Response {
-            id,
-            result: None,
-            error: Some(error),
-        },
-    }
 }

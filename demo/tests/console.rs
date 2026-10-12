@@ -202,3 +202,100 @@ fn loadtest_accepts_console_and_measurement_options_from_environment() {
     assert!(!stdout.contains(TOKEN));
     assert!(!stderr.contains(TOKEN));
 }
+
+#[test]
+fn console_route_rejects_invalid_configuration() {
+    for (arguments, token, expected) in [
+        (vec!["--console-route"], None, "--console-token"),
+        (
+            vec!["--console-route", "--host", "0.0.0.0"],
+            Some(TOKEN),
+            "loopback",
+        ),
+        (vec!["--console-route"], Some("short"), "console token"),
+        (
+            vec!["--console-route", "loadtest", "--secs", "0"],
+            Some(TOKEN),
+            "requires the web server",
+        ),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_living-city"));
+        command
+            .args(["--port", "0", "--vehicles", "0"])
+            .args(arguments)
+            .env_remove("PICARD_CONSOLE_TOKEN");
+        if let Some(token) = token {
+            command.env("PICARD_CONSOLE_TOKEN", token);
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains(expected), "{stderr}");
+    }
+}
+
+#[test]
+fn console_route_shares_the_web_server_port() {
+    let mut app = Application(
+        Command::new(env!("CARGO_BIN_EXE_living-city"))
+            .args(["--port", "0", "--vehicles", "0", "--console-route"])
+            .env("PICARD_CONSOLE_TOKEN", TOKEN)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let mut lines = BufReader::new(app.0.stdout.take().unwrap()).lines();
+    let console = lines.next().unwrap().unwrap();
+    let web = lines.next().unwrap().unwrap();
+    let url = console.strip_prefix("Living City console at ").unwrap();
+    let address = url
+        .strip_prefix("ws://")
+        .unwrap()
+        .strip_suffix("/console")
+        .unwrap();
+    assert_eq!(web, format!("Living City running at http://{address}"));
+
+    let request = |token: &str, origin: bool| {
+        let mut request = url.into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert("Authorization", format!("Bearer {token}").parse().unwrap());
+        if origin {
+            request
+                .headers_mut()
+                .insert("Origin", "http://example.com".parse().unwrap());
+        }
+        request
+    };
+    assert!(connect(url).is_err());
+    assert!(connect(request("wrong-token-wrong-token-wrong-token", false)).is_err());
+    assert!(connect(request(TOKEN, true)).is_err());
+    let (mut socket, _) = connect(request(TOKEN, false)).unwrap();
+    if let MaybeTlsStream::Plain(stream) = socket.get_ref() {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+    }
+    socket
+        .send(Message::Text(
+            json!({"id": 1, "op": "inspect", "path": "/user/supervisor"})
+                .to_string()
+                .into(),
+        ))
+        .unwrap();
+    let Message::Text(text) = socket.read().unwrap() else {
+        panic!("Expected text")
+    };
+    let response: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(response["id"], 1);
+    assert_eq!(response["result"]["path"], "/user/supervisor");
+    socket.send(Message::Binary(vec![1, 2, 3].into())).unwrap();
+    let Message::Text(text) = socket.read().unwrap() else {
+        panic!("Expected text")
+    };
+    let response: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(response["error"]["code"], "invalid_request");
+    drop(socket);
+    app.stop();
+}

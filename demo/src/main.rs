@@ -32,6 +32,11 @@ struct Cli {
         hide_env_values = true
     )]
     console_token: Option<String>,
+
+    /// Also serve the console at `/console` on the HTTP server (requires a loopback --host).
+    #[cfg(feature = "console")]
+    #[arg(long, env = "PICARD_CONSOLE_ROUTE", requires = "console_token")]
+    console_route: bool,
 }
 
 #[derive(Args)]
@@ -110,6 +115,12 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
+    #[cfg(feature = "console")]
+    if cli.console_route && cli.command.is_some() {
+        return Err(
+            "--console-route requires the web server and cannot be used with loadtest".into(),
+        );
+    }
     let vehicles = if cli.command.is_some() {
         0
     } else {
@@ -124,6 +135,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 bind,
                 token: cli
                     .console_token
+                    .clone()
                     .expect("Clap requires a token when a listen address is supplied"),
             };
             match system.start_console(options) {
@@ -154,7 +166,21 @@ async fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
-        None => server::serve_sim(SocketAddr::new(cli.server.host, cli.server.port), sim).await,
+        None => {
+            let addr = SocketAddr::new(cli.server.host, cli.server.port);
+            #[cfg(feature = "console")]
+            if cli.console_route {
+                let token = cli
+                    .console_token
+                    .as_deref()
+                    .expect("Clap requires a token for the console route");
+                server::serve_sim_with_console(addr, sim, token).await
+            } else {
+                server::serve_sim(addr, sim).await
+            }
+            #[cfg(not(feature = "console"))]
+            server::serve_sim(addr, sim).await
+        }
     };
     #[cfg(feature = "console")]
     let console_result = console

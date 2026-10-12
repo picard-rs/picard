@@ -570,3 +570,66 @@ fn json_codec_is_installed_before_actor_startup() {
     assert_eq!(events.len(), 2);
     assert!(events.iter().all(|event| event["message"] == "startup"));
 }
+
+#[test]
+fn routes_requests_through_application_owned_transport() {
+    use picard::console::{
+        Command, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, Request, is_valid_token,
+    };
+
+    let system = ActorSystem::new().unwrap();
+    let (tx, events) = mpsc::channel();
+    let actor = system.actor_of_args::<Recorder, _>("worker", tx).unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        Event::Started
+    );
+    let console = system.console();
+
+    let response: Response = serde_json::from_str(
+        &console.handle_text(r#"{"id":7,"op":"inspect","path":"/user/worker"}"#),
+    )
+    .unwrap();
+    assert_eq!(response.id, Some(7));
+    assert_eq!(response.result.unwrap()["path"], "/user/worker");
+
+    let response = console.clone().handle(Request {
+        id: 8,
+        command: Command::Pause {
+            path: "/user/worker".into(),
+        },
+    });
+    assert_eq!(response.id, Some(8));
+    assert!(response.error.is_none(), "{:?}", response.error);
+    actor.tell(Msg::Count(1), None);
+    assert!(events.recv_timeout(Duration::from_millis(200)).is_err());
+    console.handle(Request {
+        id: 9,
+        command: Command::Resume {
+            path: "/user/worker".into(),
+        },
+    });
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        Event::Received(Msg::Count(1))
+    );
+
+    for (text, id) in [
+        (r#"{"id":3,"op":"unknown"}"#.to_owned(), Some(3)),
+        ("not json".to_owned(), None),
+        (" ".repeat(MAX_REQUEST_BYTES + 1), None),
+    ] {
+        let response: Response = serde_json::from_str(&console.handle_text(&text)).unwrap();
+        assert_eq!(response.id, id);
+        assert_eq!(response.error.unwrap().code, "invalid_request");
+    }
+
+    let oversized = Response::from_result(Some(1), Ok(json!("x".repeat(MAX_RESPONSE_BYTES))));
+    let response: Response = serde_json::from_str(&oversized.to_json()).unwrap();
+    assert_eq!(response.error.unwrap().code, "response_too_large");
+
+    assert!(is_valid_token(TOKEN));
+    assert!(!is_valid_token("short"));
+    assert!(!is_valid_token(&format!("{TOKEN} ")));
+    futures::executor::block_on(system.shutdown()).unwrap();
+}

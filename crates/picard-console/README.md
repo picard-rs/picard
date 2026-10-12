@@ -4,7 +4,8 @@ An interactive terminal REPL for applications using Picard's `console` feature.
 It provides command and actor-path completion, history, colored prompts and
 results, and actor/mailbox inspection and management.
 
-Start your application's endpoint with `ActorSystem::start_console`, set
+Start your application's endpoint with `ActorSystem::start_console` (or route
+`ActorSystem::console()` through your own WebSocket endpoint), set
 `PICARD_CONSOLE_TOKEN` to its bearer token, then connect:
 
 ```sh

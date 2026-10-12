@@ -1,6 +1,8 @@
 //! Runtime inspection and control protocol for the `console` feature.
 //!
 //! The WebSocket server is available on native targets and is never started implicitly.
+//! Applications that own their transport can route JSON requests through
+//! [`ActorSystem::console`] instead; they are then responsible for authentication.
 
 use std::{
     any::Any,
@@ -16,13 +18,16 @@ use crate::{
     Envelope, LocalMessage,
     actor::{ActorRef, ActorReference, BasicActorRef},
     kernel::mailbox::{Mailbox, MailboxSchedule},
-    system::{SystemCmd, SystemMsg},
+    system::{ActorSystem, SystemCmd, SystemMsg},
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 mod server;
-#[cfg(not(target_arch = "wasm32"))]
 pub use server::{ConsoleHandle, ConsoleOptions};
+
+/// Largest request accepted by [`Console::handle_text`] and the built-in endpoint.
+pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// Serialized responses above this size are replaced by a `response_too_large` error.
+pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024 - 1024;
 
 const HISTORY_LIMIT: usize = 64;
 #[cfg(feature = "serde")]
@@ -101,6 +106,113 @@ impl ConsoleError {
             message: message.into(),
         }
     }
+}
+
+/// Transport-agnostic console service, obtained with [`ActorSystem::console`].
+///
+/// Use it to serve the console protocol over an application-owned channel, such as a route
+/// on an existing web server. The service performs no authentication: only route requests
+/// from trusted, authenticated clients, and apply [`MAX_REQUEST_BYTES`] before buffering.
+#[derive(Clone)]
+pub struct Console {
+    system: ActorSystem,
+}
+
+impl Console {
+    /// Execute one typed request.
+    pub fn handle(&self, request: Request) -> Response {
+        Response::from_result(
+            Some(request.id),
+            self.system.provider.console().execute(request.command),
+        )
+    }
+
+    /// Execute one JSON request and return the JSON response text.
+    ///
+    /// Malformed or oversized requests produce an `invalid_request` error response, and
+    /// responses larger than [`MAX_RESPONSE_BYTES`] are replaced by `response_too_large`.
+    pub fn handle_text(&self, text: &str) -> String {
+        let response = if text.len() > MAX_REQUEST_BYTES {
+            Response::from_result(
+                None,
+                Err(ConsoleError::new(
+                    "invalid_request",
+                    format!("Request exceeds {MAX_REQUEST_BYTES} bytes"),
+                )),
+            )
+        } else {
+            let parsed = serde_json::from_str::<Value>(text);
+            let id = parsed
+                .as_ref()
+                .ok()
+                .and_then(|value| value.get("id"))
+                .and_then(Value::as_u64);
+            match parsed.and_then(serde_json::from_value::<Request>) {
+                Ok(request) => self.handle(request),
+                Err(err) => Response::from_result(
+                    id,
+                    Err(ConsoleError::new("invalid_request", err.to_string())),
+                ),
+            }
+        };
+        response.to_json()
+    }
+}
+
+impl ActorSystem {
+    /// A console service for routing requests over an application-owned transport.
+    pub fn console(&self) -> Console {
+        Console {
+            system: self.clone(),
+        }
+    }
+}
+
+impl Response {
+    /// Build a response from an operation result.
+    pub fn from_result(id: Option<u64>, result: Result<Value, ConsoleError>) -> Self {
+        match result {
+            Ok(result) => Self {
+                id,
+                result: Some(result),
+                error: None,
+            },
+            Err(error) => Self {
+                id,
+                result: None,
+                error: Some(error),
+            },
+        }
+    }
+
+    /// Serialize the response, enforcing [`MAX_RESPONSE_BYTES`].
+    pub fn to_json(&self) -> String {
+        match serde_json::to_string(self) {
+            Ok(text) if text.len() <= MAX_RESPONSE_BYTES => text,
+            Ok(_) => Self::from_result(
+                self.id,
+                Err(ConsoleError::new(
+                    "response_too_large",
+                    "Response exceeds one MiB; request a smaller actor page",
+                )),
+            )
+            .to_json(),
+            Err(err) => Self::from_result(
+                self.id,
+                Err(ConsoleError::new("serialization", err.to_string())),
+            )
+            .to_json(),
+        }
+    }
+}
+
+/// Whether `token` meets the console's bearer token requirements: at least 32 ASCII
+/// letters, digits, `-` or `_`. Custom transports can use it to apply the same policy.
+pub fn is_valid_token(token: &str) -> bool {
+    token.len() >= 32
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 #[derive(Default)]

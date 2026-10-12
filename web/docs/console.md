@@ -51,6 +51,42 @@ The endpoint exposes application internals and destructive controls. Treat
 the token as an administrative credential. Remote use should go through a
 secure tunnel to the loopback port; the endpoint does not provide TLS.
 
+## Custom transports
+
+Applications that already run a server can expose the console through their own
+endpoint instead of calling `start_console`. `ActorSystem::console()` returns a
+cloneable, transport-agnostic `Console` service that executes protocol requests:
+
+```rust
+use picard::{actors::ActorSystem, console::Console};
+
+fn console_service(sys: &ActorSystem) -> Console {
+    sys.console()
+}
+
+fn on_console_text(console: &Console, text: &str) -> String {
+    // `text` comes from an authenticated client of your own server.
+    console.handle_text(text)
+}
+```
+
+- `handle_text(&str) -> String` parses one JSON request and returns the JSON
+  response. Malformed requests and requests larger than `MAX_REQUEST_BYTES`
+  (64 KiB) produce `invalid_request`; responses above `MAX_RESPONSE_BYTES` are
+  replaced by `response_too_large`.
+- `handle(Request) -> Response` is the typed equivalent. `Response::to_json`
+  applies the same response size limit.
+- The service is synchronous and may run user serializers, so async servers
+  should call it from a blocking task (for example `tokio::task::spawn_blocking`).
+
+The service performs no authentication. Your transport must authenticate clients
+before routing requests, cap request sizes, and limit concurrent clients.
+`console::is_valid_token` checks a bearer token against the built-in endpoint's
+policy. To stay compatible with `picard-console`, serve WebSocket JSON text frames,
+require `Authorization: Bearer <token>`, and reject browser upgrades that carry
+an `Origin` header. Living City's `--console-route` (in `demo/src/server.rs`) is
+an axum example.
+
 ## Interactive REPL
 
 The `picard-console` workspace crate provides a terminal client:
@@ -86,7 +122,10 @@ colors; `NO_COLOR` disables them, and redirected output is uncolored.
 History is stored at `$XDG_STATE_HOME/picard-console/history`, or
 `$HOME/.local/state/picard-console/history`. `send` commands are never saved
 because payloads may be sensitive. Connection and protocol errors are explicit;
-there is no automatic reconnect or retry of destructive operations.
+there is no automatic reconnect or retry of destructive operations. If no
+endpoint is listening, the client reports `Unable to connect` with a hint: check
+that the application was built with `console` and that it started an endpoint
+(the feature alone opens no port).
 
 ### Living City
 
@@ -99,7 +138,15 @@ cargo run -p living-city --release --features console,serde -- \
   --console-listen 127.0.0.1:9000
 ```
 
-The same option works with `loadtest`. See the [Living City guide](../../demo/GUIDE.md)
+The same option works with `loadtest`. Alternatively, `--console-route` serves
+the console at `/console` on the demo's own web server (loopback `--host` only):
+
+```sh
+cargo run -p living-city --release --features console,serde -- --console-route
+cargo run -p picard-console -- ws://127.0.0.1:8080/console
+```
+
+See the [Living City guide](../../demo/GUIDE.md)
 for Clap environment options and its JSON message compatibility.
 
 ## Inspection and management semantics
