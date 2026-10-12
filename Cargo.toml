@@ -20,6 +20,7 @@ config = "0.15"
 futures = "0.3.4"
 log = "0.4"
 serde = { version = "1.0.229", features = ["derive"] }
+uuid = { version = "1", features = ["serde"] }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -18,6 +18,55 @@ back to defaults. Server options can also be set with `LIVING_CITY_HOST`,
 `LIVING_CITY_LOADTEST_SECS`. Command-line options override environment variables.
 IPv6 hosts are supported, for example `--host ::1`.
 
+### Distributed districts
+
+Remote district support is opt-in and is not part of the default build. It
+uses Picard's authenticated WebSocket remoting:
+
+```sh
+LIVING_CITY_REMOTE_TOKEN="$(openssl rand -hex 32)" \
+  cargo run -p living-city --release --features remoting -- \
+  --district 0 --web-ui --host 0.0.0.0 \
+  --connect 1=ws://127.0.0.1:9101/remoting
+
+LIVING_CITY_REMOTE_TOKEN="<same-token>" \
+  cargo run -p living-city --release --features remoting -- \
+  --district 1 \
+  --connect 0=ws://127.0.0.1:9100/remoting
+```
+
+Each process runs only the district given by `--district` (0 through 8).
+`--connect DISTRICT=ENDPOINT` may be repeated to connect to each other process;
+connections discover the remote actor-system ID over the authenticated
+connection. `--web-ui` chooses which process serves the browser UI; without it,
+a distributed process runs headless until Ctrl-C. The bearer token is required
+and should be provided with `LIVING_CITY_REMOTE_TOKEN`, not a command-line
+argument. The listener defaults to `0.0.0.0:9100` and can be changed with
+`--remote-listen` or `LIVING_CITY_REMOTE_LISTEN`. Set `--vehicles` per district
+in distributed mode. Browser controls are forwarded to connected supervisors,
+and district snapshots are relayed to peers for aggregation at the UI gateway.
+
+The transport is plain WebSocket by default. Use a private/trusted network or
+terminate TLS at a trusted reverse proxy and secure the proxy-to-process path.
+All peers configured as outgoing connections are allow-listed by the same
+shared bearer token. A process needs a peer entry for every other process for
+the mesh to exchange commands and snapshots. In this demo slice each district
+owns and simulates its local junctions and vehicles; direct vehicle crossing
+between remote district actors and transparent remote `ActorRef`s are not yet
+implemented.
+
+Build and run the nine-container example from the repository root:
+
+```sh
+export LIVING_CITY_REMOTE_TOKEN="$(openssl rand -hex 32)"
+docker compose -f demo/compose.yml up --build
+```
+
+The compose file starts one container per district, connects them over the
+private Compose network, and publishes only the district-0 web UI on port 8080.
+For production, supply a secret from a secret manager rather than a shell
+environment file.
+
 ### Runtime console
 
 Living City's `console` and `serde` features forward to `picard/console` and

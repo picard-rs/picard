@@ -22,6 +22,8 @@ pub struct SupervisorArgs {
     pub gateway: ActorRef<GatewayMsg>,
     pub metrics: Arc<Metrics>,
     pub initial_vehicles: usize,
+    pub district: Option<usize>,
+    pub district_count: Option<usize>,
 }
 
 pub struct Supervisor {
@@ -38,7 +40,11 @@ pub struct Supervisor {
 impl ActorFactoryArgs<SupervisorArgs> for Supervisor {
     fn create_args(args: SupervisorArgs) -> Self {
         Self {
-            per_district: args.initial_vehicles / DEFAULT_ACTIVE.len(),
+            per_district: if args.district.is_some() {
+                args.initial_vehicles
+            } else {
+                args.initial_vehicles / DEFAULT_ACTIVE.len()
+            },
             args,
             districts: BTreeMap::new(),
             junctions: std::collections::HashMap::new(),
@@ -124,10 +130,18 @@ impl Supervisor {
             self.stop_district(ctx, index);
         }
         self.junctions.clear();
-        self.per_district = self.args.initial_vehicles / DEFAULT_ACTIVE.len();
+        self.per_district = if self.args.district.is_some() {
+            self.args.initial_vehicles
+        } else {
+            self.args.initial_vehicles / DEFAULT_ACTIVE.len()
+        };
         self.paused = false;
-        for index in DEFAULT_ACTIVE {
+        if let Some(index) = self.args.district {
             self.start_district(ctx, index);
+        } else {
+            for index in DEFAULT_ACTIVE {
+                self.start_district(ctx, index);
+            }
         }
         self.status();
     }
@@ -139,8 +153,12 @@ impl Actor for Supervisor {
     fn pre_start(&mut self, ctx: &Context<Self::Msg>) {
         let period = Duration::from_secs_f32(TICK_DT);
         ctx.schedule(period, period, ctx.myself(), None, SupervisorMsg::Tick);
-        for index in DEFAULT_ACTIVE {
+        if let Some(index) = self.args.district {
             self.start_district(ctx, index);
+        } else {
+            for index in DEFAULT_ACTIVE {
+                self.start_district(ctx, index);
+            }
         }
         self.status();
     }
@@ -170,7 +188,10 @@ impl Actor for Supervisor {
             SupervisorMsg::Reset => self.reset(ctx),
             SupervisorMsg::SetVehicles(total) => {
                 if !self.districts.is_empty() {
-                    self.per_district = total / self.districts.len();
+                    self.per_district = self
+                        .args
+                        .district_count
+                        .map_or_else(|| total / self.districts.len(), |count| total / count);
                     self.broadcast(&DistrictMsg::SetTarget(self.per_district));
                     self.status();
                 }
@@ -181,13 +202,17 @@ impl Actor for Supervisor {
                 }
             }
             SupervisorMsg::AddDistrict(index) => {
-                if index < DISTRICT_COUNT {
+                if index < DISTRICT_COUNT
+                    && self.args.district.is_none_or(|district| district == index)
+                {
                     self.start_district(ctx, index);
                     self.status();
                 }
             }
             SupervisorMsg::RemoveDistrict(index) => {
-                if self.districts.len() > 1 {
+                if (self.args.district.is_some() || self.districts.len() > 1)
+                    && self.args.district.is_none_or(|district| district == index)
+                {
                     self.stop_district(ctx, index);
                     self.status();
                 }

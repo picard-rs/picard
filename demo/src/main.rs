@@ -7,6 +7,8 @@ use std::{
 };
 
 use clap::{Args, Parser, Subcommand};
+#[cfg(feature = "remoting")]
+use living_city::remoting::PeerSpec;
 use living_city::{loadtest, server, sim::Sim};
 
 #[derive(Parser)]
@@ -37,6 +39,56 @@ struct Cli {
     #[cfg(feature = "console")]
     #[arg(long, env = "PICARD_CONSOLE_ROUTE", requires = "console_token")]
     console_route: bool,
+
+    /// Run only this district in a distributed simulation.
+    #[cfg(feature = "remoting")]
+    #[arg(long, value_parser = parse_district)]
+    district: Option<usize>,
+
+    /// Expose the browser UI from this district process.
+    #[cfg(feature = "remoting")]
+    #[arg(long, requires = "district")]
+    web_ui: bool,
+
+    /// Listen for authenticated remote actor messages.
+    #[cfg(feature = "remoting")]
+    #[arg(
+        long,
+        env = "LIVING_CITY_REMOTE_LISTEN",
+        default_value = "0.0.0.0:9100",
+        requires = "district"
+    )]
+    remote_listen: SocketAddr,
+
+    /// Shared peer token; use LIVING_CITY_REMOTE_TOKEN rather than a CLI value in deployments.
+    #[cfg(feature = "remoting")]
+    #[arg(
+        long,
+        env = "LIVING_CITY_REMOTE_TOKEN",
+        hide_env_values = true,
+        requires = "district"
+    )]
+    remote_token: Option<String>,
+
+    /// Connect to another district, in DISTRICT=ws://HOST:PORT/remoting form; may be repeated.
+    #[cfg(feature = "remoting")]
+    #[arg(long, value_name = "DISTRICT=ENDPOINT", requires = "district")]
+    connect: Vec<PeerSpec>,
+}
+
+#[cfg(feature = "remoting")]
+fn parse_district(value: &str) -> Result<usize, String> {
+    let district = value
+        .parse::<usize>()
+        .map_err(|err| format!("expected a district number from 0 to 8: {err}"))?;
+    (district < living_city::city::DISTRICT_COUNT)
+        .then_some(district)
+        .ok_or_else(|| {
+            format!(
+                "district must be less than {}",
+                living_city::city::DISTRICT_COUNT
+            )
+        })
 }
 
 #[derive(Args)]
@@ -115,17 +167,27 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
-    #[cfg(feature = "console")]
-    if cli.console_route && cli.command.is_some() {
-        return Err(
-            "--console-route requires the web server and cannot be used with loadtest".into(),
-        );
-    }
+    #[cfg(any(feature = "console", feature = "remoting"))]
+    validate_cli(&cli)?;
     let vehicles = if cli.command.is_some() {
         0
     } else {
         cli.server.vehicles
     };
+    #[cfg(feature = "remoting")]
+    let distributed = cli.district.is_some();
+    #[cfg(feature = "remoting")]
+    let sim = match cli.district {
+        Some(district) => Sim::start_remote(
+            vehicles,
+            district,
+            cli.remote_listen,
+            cli.remote_token.clone().expect("validated remote token"),
+            &cli.connect,
+        )?,
+        None => Sim::start(vehicles)?,
+    };
+    #[cfg(not(feature = "remoting"))]
     let sim = Sim::start(vehicles)?;
     let system = sim.system.clone();
     #[cfg(feature = "console")]
@@ -167,19 +229,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         None => {
-            let addr = SocketAddr::new(cli.server.host, cli.server.port);
-            #[cfg(feature = "console")]
-            if cli.console_route {
-                let token = cli
-                    .console_token
-                    .as_deref()
-                    .expect("Clap requires a token for the console route");
-                server::serve_sim_with_console(addr, sim, token).await
-            } else {
-                server::serve_sim(addr, sim).await
-            }
-            #[cfg(not(feature = "console"))]
-            server::serve_sim(addr, sim).await
+            #[cfg(feature = "remoting")]
+            let headless = distributed && !cli.web_ui;
+            #[cfg(not(feature = "remoting"))]
+            let headless = false;
+            serve(sim, &cli, headless).await
         }
     };
     #[cfg(feature = "console")]
@@ -194,6 +248,61 @@ async fn run(cli: Cli) -> Result<(), String> {
     console_result?;
     shutdown?;
     result
+}
+
+async fn serve(sim: Sim, cli: &Cli, headless: bool) -> Result<(), String> {
+    if headless {
+        #[cfg(feature = "remoting")]
+        println!(
+            "Living City district {} running headless",
+            cli.district.unwrap_or_default()
+        );
+        #[cfg(not(feature = "remoting"))]
+        println!("Living City running headless");
+        tokio::signal::ctrl_c()
+            .await
+            .map_err(|err| format!("cannot wait for shutdown signal: {err}"))?;
+        Ok(())
+    } else {
+        let addr = SocketAddr::new(cli.server.host, cli.server.port);
+        #[cfg(feature = "console")]
+        if cli.console_route {
+            let token = cli
+                .console_token
+                .as_deref()
+                .expect("Clap requires a token for the console route");
+            server::serve_sim_with_console(addr, sim, token).await
+        } else {
+            server::serve_sim(addr, sim).await
+        }
+        #[cfg(not(feature = "console"))]
+        server::serve_sim(addr, sim).await
+    }
+}
+
+#[cfg(any(feature = "console", feature = "remoting"))]
+fn validate_cli(cli: &Cli) -> Result<(), String> {
+    #[cfg(feature = "console")]
+    if cli.console_route && cli.command.is_some() {
+        return Err(
+            "--console-route requires the web server and cannot be used with loadtest".into(),
+        );
+    }
+    #[cfg(feature = "remoting")]
+    let distributed = cli.district.is_some();
+    #[cfg(feature = "remoting")]
+    if distributed && cli.command.is_some() {
+        return Err("distributed districts cannot be combined with the loadtest command".into());
+    }
+    #[cfg(feature = "remoting")]
+    if !distributed && (!cli.connect.is_empty() || cli.web_ui) {
+        return Err("--connect and --web-ui require --district".into());
+    }
+    #[cfg(feature = "remoting")]
+    if distributed && cli.remote_token.as_deref().is_none_or(str::is_empty) {
+        return Err("distributed mode requires --remote-token or LIVING_CITY_REMOTE_TOKEN".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -256,6 +365,37 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(arguments).is_err());
         }
+    }
+
+    #[cfg(feature = "remoting")]
+    #[test]
+    fn distributed_arguments_are_feature_gated_and_validated() {
+        let cli = Cli::try_parse_from([
+            "living-city",
+            "--district",
+            "2",
+            "--web-ui",
+            "--connect",
+            "3=ws://district-3:9100/remoting",
+            "--remote-token",
+            "secret",
+        ])
+        .unwrap();
+        assert_eq!(cli.district, Some(2));
+        assert!(cli.web_ui);
+        assert_eq!(cli.connect[0].district, 3);
+        assert_eq!(cli.connect[0].endpoint, "ws://district-3:9100/remoting");
+        assert!(Cli::try_parse_from(["living-city", "--district", "9"]).is_err());
+        assert!(
+            Cli::try_parse_from(["living-city", "--district", "1", "--connect", "bad"]).is_err()
+        );
+    }
+
+    #[cfg(not(feature = "remoting"))]
+    #[test]
+    fn distributed_arguments_are_unavailable_without_feature() {
+        assert!(Cli::try_parse_from(["living-city", "--district", "0"]).is_err());
+        assert!(Cli::try_parse_from(["living-city", "--web-ui"]).is_err());
     }
 
     #[cfg(feature = "console")]
