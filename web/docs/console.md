@@ -239,6 +239,19 @@ the message was queued, not that the actor accepted it. In the wire protocol thi
 `{"op":"send","peer":"district-1","path":"/user/gateway","message":{...}}` and
 `{"op":"peers"}`. The Living City demo registers every `--connect` peer as `district-N`.
 
+### Querying and managing remote actors
+
+`@PEER COMMAND` runs any inspection or management command (`actors`, `inspect`, `messages`,
+`pause`, `resume`, `clear`, `stop`, `restart`) on the console of a remote system, through the
+system you are connected to: `@district-1 inspect /user/supervisor`. The application
+registers the peer with `ActorSystem::register_console_peer_query(name, query)`, where
+`query` carries a request as JSON text to the remote system and returns the text of
+`Console::handle_text` there. Forwarded requests cannot be forwarded again, and the remote
+console applies its own rules (for example, runtime actors stay protected). The wire form is
+`{"op":"forward","peer":"district-1","command":{"op":"inspect","path":"/user/x"}}`.
+Remote `actors` returns the first page only. Whoever holds a peer's shared token can use
+this path, so it grants the same trust as sending messages to that peer.
+
 ## Typed JSON sends
 
 `send` looks up the target actor's registered decoder and deserializes the JSON
@@ -289,7 +302,7 @@ Every request has an unsigned integer `id` and an `op`:
 ```
 
 Supported operations are `actors`, `inspect`, `messages`, `pause`, `resume`,
-`clear`, `stop`, `restart`, `send`, and `peers`. All except `actors` and `peers`
+`clear`, `stop`, `restart`, `send`, `forward`, and `peers`. All except `actors` and `peers`
 require `path`; `send` additionally requires `message` and accepts an optional `peer`.
 
 `actors` defaults to `offset: 0` and `limit: 100`. Limits must be in `1..=100`.

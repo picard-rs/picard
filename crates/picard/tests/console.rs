@@ -671,3 +671,53 @@ fn send_can_target_a_registered_remote_peer() {
         assert_eq!(response.error.unwrap().code, code);
     }
 }
+
+#[test]
+fn forward_runs_commands_on_a_registered_peer_console() {
+    let mut fixture = Fixture::new();
+    let remote = ActorSystem::new().unwrap();
+    let remote_console = remote.console();
+    fixture.system.register_console_peer_query(
+        "remote",
+        std::sync::Arc::new(move |request| {
+            assert!(!request.contains("forward"), "{request}");
+            Ok(remote_console.handle_text(request))
+        }),
+    );
+    let peers = fixture.request(json!({ "op": "peers" })).result.unwrap();
+    assert_eq!(peers["peers"], json!(["remote"]));
+
+    let response = fixture
+        .request(json!({ "op": "forward", "peer": "remote", "command": { "op": "actors" } }));
+    let actors = response.result.expect("remote actor list");
+    let paths: Vec<_> = actors["actors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|actor| actor["path"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(!paths.contains(&"/user/worker".to_owned()), "{paths:?}");
+
+    for (command, code) in [
+        (
+            json!({ "op": "inspect", "path": "/user/worker" }),
+            "not_found",
+        ),
+        (
+            json!({ "op": "send", "path": "/user/x", "message": 1 }),
+            "invalid_request",
+        ),
+        (
+            json!({ "op": "forward", "peer": "remote", "command": { "op": "actors" } }),
+            "invalid_request",
+        ),
+    ] {
+        let response =
+            fixture.request(json!({ "op": "forward", "peer": "remote", "command": command }));
+        assert_eq!(response.error.unwrap().code, code);
+    }
+    let missing =
+        fixture.request(json!({ "op": "forward", "peer": "nope", "command": { "op": "actors" } }));
+    assert_eq!(missing.error.unwrap().code, "not_found");
+    futures::executor::block_on(remote.shutdown()).unwrap();
+}

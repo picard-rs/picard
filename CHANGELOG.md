@@ -14,3 +14,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   processes.
 - The `picard-console` TUI shows the actor tree collapsed; Right/Left expand and collapse children.
 - The console can `send @peer PATH JSON` to actors on registered remote peers (`peers` lists them).
+- The console can run inspection and management commands on remote peers with `@peer COMMAND`.
