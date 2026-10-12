@@ -6,6 +6,8 @@ use slog::trace;
 use std::sync::Arc;
 
 use crate::system::LoggingSystem;
+#[cfg(feature = "remoting")]
+use crate::{Envelope, kernel::mailbox::ProcessedAck};
 use crate::{
     actor::actor_cell::{ActorCell, ExtendedCell},
     actor::actor_ref::SystemTell,
@@ -34,7 +36,11 @@ struct ProviderInner {
 
 #[cfg(feature = "remoting")]
 type RemoteDispatcher = Arc<
-    dyn Fn(serde_json::Value, Option<BasicActorRef>) -> Result<(), crate::remoting::RemoteError>
+    dyn Fn(
+            serde_json::Value,
+            Option<BasicActorRef>,
+            Option<ProcessedAck>,
+        ) -> Result<(), crate::remoting::RemoteError>
         + Send
         + Sync,
 >;
@@ -172,15 +178,19 @@ impl Provider {
         Msg: crate::Message,
     {
         let path = actor.path().clone();
-        let target = BasicActorRef::from(actor);
+        let target = actor;
         self.inner.remote_dispatchers.insert(
             path,
-            Arc::new(move |payload, sender| {
+            Arc::new(move |payload, sender, processed_ack| {
                 let msg = serde_json::from_value::<Msg>(payload)
                     .map_err(|err| crate::remoting::RemoteError::InvalidMessage(err.to_string()))?;
-                target
-                    .try_tell(msg, sender)
-                    .map_err(|err| crate::remoting::RemoteError::Rejected(format!("{err:?}")))
+                let envelope = Envelope { msg, sender };
+                let result = if let Some(ack) = processed_ack {
+                    target.cell.send_msg_with_ack(envelope, ack)
+                } else {
+                    target.cell.send_msg(envelope)
+                };
+                result.map_err(|err| crate::remoting::RemoteError::Rejected(format!("{err:?}")))
             }),
         );
     }
@@ -198,6 +208,17 @@ impl Provider {
         }
         if request.sender.is_some() != request.reply_timeout_ms.is_some() {
             return Err(crate::remoting::RemoteError::UnsupportedSender);
+        }
+        if request.processed_timeout_ms.is_some()
+            && (request.sender.is_some() || request.reply_timeout_ms.is_some())
+        {
+            return Err(crate::remoting::RemoteError::UnsupportedSender);
+        }
+        if request
+            .processed_timeout_ms
+            .is_some_and(|timeout_ms| timeout_ms > crate::remoting::MAX_REMOTE_ASK_TIMEOUT_MS)
+        {
+            return Err(crate::remoting::RemoteError::TimeoutTooLong);
         }
         if request
             .reply_timeout_ms
@@ -233,7 +254,27 @@ impl Provider {
             .get(&path)
             .map(|dispatcher| dispatcher.clone())
             .ok_or_else(|| crate::remoting::RemoteError::ActorNotFound(path.to_string()))?;
-        dispatcher(request.payload.clone(), reply_sender)?;
+        let (processed_ack, processed_receiver) = if request.processed_timeout_ms.is_some() {
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            (Some(ProcessedAck::new(sender)), Some(receiver))
+        } else {
+            (None, None)
+        };
+        dispatcher(request.payload.clone(), reply_sender, processed_ack)?;
+        if let (Some(receiver), Some(timeout_ms)) =
+            (processed_receiver, request.processed_timeout_ms)
+        {
+            receiver
+                .recv_timeout(std::time::Duration::from_millis(timeout_ms))
+                .map_err(|error| match error {
+                    std::sync::mpsc::RecvTimeoutError::Timeout => {
+                        crate::remoting::RemoteError::ProcessedTimeout
+                    }
+                    std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                        crate::remoting::RemoteError::ProcessedTimeout
+                    }
+                })?;
+        }
         match (reply_receiver, request.reply_timeout_ms) {
             (Some(receiver), Some(timeout_ms)) => receiver
                 .recv_timeout(std::time::Duration::from_millis(timeout_ms))

@@ -12,6 +12,8 @@ use chrono::prelude::*;
 use futures::{Future, future::RemoteHandle, task::SpawnError};
 use uuid::Uuid;
 
+#[cfg(feature = "remoting")]
+use crate::kernel::mailbox::ProcessedAck;
 use crate::{
     AnyMessage, Envelope, LocalMessage, Message,
     actor::actor_ref::SystemTell,
@@ -470,6 +472,27 @@ where
                 None,
             );
         })
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn send_msg_with_ack(
+        &self,
+        msg: Envelope<Msg>,
+        ack: ProcessedAck,
+    ) -> MsgResult<Envelope<Msg>> {
+        let res = crate::kernel::kernel_ref::dispatch_with_ack(
+            msg,
+            ack,
+            &self.mailbox,
+            self.cell.kernel(),
+        );
+        #[cfg(feature = "stats")]
+        self.cell
+            .inner
+            .system
+            .stats_recorder()
+            .message_sent(res.is_ok());
+        res
     }
 
     pub(crate) fn send_sys_msg(&self, msg: Envelope<SystemMsg>) -> MsgResult<Envelope<SystemMsg>> {

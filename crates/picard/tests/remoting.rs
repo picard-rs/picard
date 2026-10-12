@@ -69,6 +69,20 @@ impl Actor for DropsReply {
     fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {}
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct ProcessingDelay(u64);
+
+#[derive(Default)]
+struct DelayedProcessor;
+
+impl Actor for DelayedProcessor {
+    type Msg = ProcessingDelay;
+
+    fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
+        std::thread::sleep(Duration::from_millis(msg.0));
+    }
+}
+
 #[test]
 fn websocket_remoting_routes_a_serialized_message_to_an_actor() {
     let sender_system = ActorSystem::new().unwrap();
@@ -102,6 +116,69 @@ fn websocket_remoting_routes_a_serialized_message_to_an_actor() {
 
     assert!(response.accepted);
     assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), sent);
+    listener.shutdown();
+}
+
+#[test]
+fn websocket_remoting_can_wait_until_the_actor_finishes_processing() {
+    let caller = ActorSystem::new().unwrap();
+    let receiver = ActorSystem::new().unwrap();
+    let actor = receiver.actor_of::<DelayedProcessor>("delayed").unwrap();
+    let listener = receiver
+        .listen_remote_actors(
+            "127.0.0.1:0".parse().unwrap(),
+            PeerAuthenticator::new([("caller".into(), "processed-token".into())]),
+        )
+        .unwrap();
+    let endpoint = format!(
+        "ws://{}/remoting",
+        listener.local_addr().expect("WebSocket listener address")
+    );
+    let remote = caller
+        .connect_remote(RemotePeer::new("receiver", endpoint.clone(), "processed-token").unwrap());
+    let destination = ActorAddress::remote(receiver.id(), endpoint, actor.path().to_string());
+
+    let started = Instant::now();
+    futures::executor::block_on(remote.send_processed(
+        destination,
+        ProcessingDelay(60),
+        Duration::from_secs(1),
+    ))
+    .unwrap();
+
+    assert!(started.elapsed() >= Duration::from_millis(50));
+    listener.shutdown();
+}
+
+#[test]
+fn websocket_remoting_reports_a_processed_delivery_timeout() {
+    let caller = ActorSystem::new().unwrap();
+    let receiver = ActorSystem::new().unwrap();
+    let actor = receiver.actor_of::<DelayedProcessor>("delayed").unwrap();
+    let listener = receiver
+        .listen_remote_actors(
+            "127.0.0.1:0".parse().unwrap(),
+            PeerAuthenticator::new([("caller".into(), "processed-token".into())]),
+        )
+        .unwrap();
+    let endpoint = format!(
+        "ws://{}/remoting",
+        listener.local_addr().expect("WebSocket listener address")
+    );
+    let remote = caller
+        .connect_remote(RemotePeer::new("receiver", endpoint.clone(), "processed-token").unwrap());
+    let destination = ActorAddress::remote(receiver.id(), endpoint, actor.path().to_string());
+
+    let result = futures::executor::block_on(remote.send_processed(
+        destination,
+        ProcessingDelay(80),
+        Duration::from_millis(5),
+    ));
+
+    assert!(matches!(
+        result,
+        Err(picard::remoting::RemoteError::ProcessedTimeout)
+    ));
     listener.shutdown();
 }
 

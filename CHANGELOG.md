@@ -9,7 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - Typed remote actor request/reply through `Sender`, with reply timeouts and peer failure errors;
-  the remoting wire protocol is now version 2.
+  the remoting wire protocol is now version 3.
+- Remote actor delivery can optionally wait for the destination's message handler to return.
 - Optional `living-city` distributed-district mode using authenticated WebSocket remoting, with
   peer status/snapshot aggregation and a nine-district Docker Compose deployment.
 - Vehicles in the distributed `living-city` mode migrate between districts running in different

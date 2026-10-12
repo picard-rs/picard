@@ -81,6 +81,19 @@ remote actor's reply wait after the request reaches its system; transport
 setup failures are reported separately. Timeouts are limited to 60 seconds to
 bound the time a listener worker waits on any one request.
 
+For a delivery barrier, use `RemoteConnection::send_processed`:
+
+```rust,ignore
+remote
+    .send_processed(address, message, std::time::Duration::from_secs(2))
+    .await?;
+```
+
+This waits until the destination actor's `recv` call returns, not merely until
+the message is enqueued. If the timeout expires, the processing outcome is
+unknown: the actor may still be processing the message. The timeout is capped
+at 60 seconds.
+
 `send` remains fire-and-forget with a mailbox-acceptance acknowledgment.
 Application-defined exchanges may also use `listen_remote` with a custom
 `RemoteHandler`, which can return a `RemoteResponse` payload.
@@ -96,7 +109,8 @@ handler interface as the built-in WebSocket transport.
 
 ## Protocol and security boundaries
 
-- Protocol version 2 uses JSON messages and limits frames to 1 MiB.
+- Protocol version 3 uses JSON messages and limits frames to 1 MiB. It adds
+  processed-delivery acknowledgments and is not wire-compatible with v2 peers.
 - Peer bearer tokens are sent in the HTTP upgrade `Authorization` header, not
   in URLs, and are redacted from `Debug` output.
 - Use `wss://` or a private network for transport confidentiality and integrity.

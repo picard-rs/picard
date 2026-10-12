@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use futures::channel::mpsc::UnboundedSender;
 
+#[cfg(feature = "remoting")]
+use crate::kernel::mailbox::ProcessedAck;
 use crate::{
     AnyMessage, Envelope, LocalMessage,
     actor::{MsgError, MsgResult},
@@ -54,10 +56,32 @@ where
                 mbox.set_scheduled(true);
                 kernel.schedule();
             }
-
             Ok(())
         }
         Err(e) => Err(MsgError::new(e.msg)),
+    }
+}
+
+#[cfg(feature = "remoting")]
+pub fn dispatch_with_ack<Msg>(
+    msg: Envelope<Msg>,
+    ack: ProcessedAck,
+    mbox: &MailboxSender<Msg>,
+    kernel: &KernelRef,
+) -> MsgResult<Envelope<Msg>>
+where
+    Msg: LocalMessage,
+{
+    match mbox.try_enqueue_with_ack(msg, Some(ack)) {
+        Ok(()) => {
+            if !mbox.is_scheduled() {
+                mbox.set_scheduled(true);
+                kernel.schedule();
+            }
+
+            Ok(())
+        }
+        Err(error) => Err(MsgError::new(error.msg.envelope)),
     }
 }
 

@@ -39,7 +39,7 @@ use uuid::Uuid;
 /// Maximum JSON frame accepted by the built-in transport.
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// Current wire-protocol version.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 /// Maximum time a remote ask may wait for an actor reply.
 pub const MAX_REMOTE_ASK_TIMEOUT_MS: u64 = 60_000;
 
@@ -93,6 +93,9 @@ pub struct RemoteRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Maximum time to wait for the actor's first reply, in milliseconds.
     pub reply_timeout_ms: Option<u64>,
+    /// Maximum time to wait for the actor to finish processing, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processed_timeout_ms: Option<u64>,
     pub payload: Value,
 }
 
@@ -106,13 +109,15 @@ impl RemoteRequest {
             destination,
             sender,
             reply_timeout_ms: None,
+            processed_timeout_ms: None,
             payload,
         }
     }
 }
 
-/// A transport-level acknowledgment. `accepted` means the receiving runtime
-/// accepted the message into the local actor mailbox, not that it processed it.
+/// A transport-level acknowledgment. Without a processing timeout request,
+/// `accepted` means the message entered the local actor mailbox; with one, it
+/// means the actor's `recv` call returned.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteResponse {
@@ -185,6 +190,8 @@ pub enum RemoteError {
     Rejected(String),
     #[error("remote actor did not reply before the timeout")]
     Timeout,
+    #[error("remote actor did not finish processing the message before the timeout")]
+    ProcessedTimeout,
     #[error("remote actor dropped its reply sender without replying")]
     NoReply,
     #[error("remote ask timeout exceeds the 60-second limit")]
@@ -365,6 +372,45 @@ impl RemoteConnection {
         )
     }
 
+    /// Send a typed message and wait until the remote actor's `recv` call
+    /// returns. A timeout reports an unknown processing outcome.
+    pub fn send_processed<Request>(
+        &self,
+        destination: ActorAddress,
+        message: Request,
+        timeout: Duration,
+    ) -> RemoteFuture<()>
+    where
+        Request: Serialize + Send + 'static,
+    {
+        let peer = self.peer.clone();
+        let transport = self.transport.clone();
+        Box::pin(async move {
+            if timeout > Duration::from_millis(MAX_REMOTE_ASK_TIMEOUT_MS) {
+                return Err(RemoteError::TimeoutTooLong);
+            }
+            let millis = timeout.as_millis();
+            let timeout_ms = u64::try_from(if timeout.subsec_nanos().is_multiple_of(1_000_000) {
+                millis
+            } else {
+                millis + 1
+            })
+            .map_err(|_| RemoteError::TimeoutTooLong)?;
+            let payload = serde_json::to_value(message)
+                .map_err(|err| RemoteError::InvalidMessage(err.to_string()))?;
+            let mut request = RemoteRequest::new(destination, None, payload);
+            request.processed_timeout_ms = Some(timeout_ms);
+            let response = transport.send(peer, request).await?;
+            if response.accepted {
+                Ok(())
+            } else {
+                Err(response.error.unwrap_or_else(|| {
+                    RemoteError::Rejected("remote peer did not accept the message".into())
+                }))
+            }
+        })
+    }
+
     /// Send a typed request to a remote actor and wait for the first reply
     /// sent through its `Sender`, or for the remote processing timeout.
     pub fn ask<Request, Reply>(
@@ -516,7 +562,7 @@ fn websocket_send(
         .insert(AUTHORIZATION, authorization);
     http_request.headers_mut().insert(
         SEC_WEBSOCKET_PROTOCOL,
-        HeaderValue::from_static("picard.remoting.v2"),
+        HeaderValue::from_static("picard.remoting.v3"),
     );
 
     let config = WebSocketConfig::default()
@@ -584,7 +630,7 @@ fn serve_peer(stream: TcpStream, authenticator: PeerAuthenticator, handler: Remo
                 .headers()
                 .get(SEC_WEBSOCKET_PROTOCOL)
                 .and_then(|value| value.to_str().ok())
-                != Some("picard.remoting.v2")
+                != Some("picard.remoting.v3")
             {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
                 return Err(response.map(|()| Some("unsupported WebSocket subprotocol".into())));
@@ -592,7 +638,7 @@ fn serve_peer(stream: TcpStream, authenticator: PeerAuthenticator, handler: Remo
             peer_id = Some(authenticated);
             response.headers_mut().insert(
                 SEC_WEBSOCKET_PROTOCOL,
-                HeaderValue::from_static("picard.remoting.v2"),
+                HeaderValue::from_static("picard.remoting.v3"),
             );
             Ok(response)
         },

@@ -1,6 +1,7 @@
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
+    mpsc::SyncSender,
 };
 use std::thread;
 
@@ -11,7 +12,7 @@ use crate::{
     actor::{Actor, ActorReference, BasicActorRef, Context, DeadLetter, Publish, Sender, Tell},
     kernel::{
         Dock,
-        queue::{EnqueueResult, QueueEmpty, QueueReader, QueueWriter, queue},
+        queue::{EnqueueError, EnqueueResult, QueueEmpty, QueueReader, QueueWriter, queue},
     },
     system::ActorCreated,
     system::{ActorSystem, SystemEvent, SystemMsg},
@@ -40,8 +41,28 @@ pub trait AnySender: Send + Sync {
     fn is_sched(&self) -> bool;
 }
 
+#[derive(Debug)]
+pub(crate) struct ProcessedAck(SyncSender<()>);
+
+impl ProcessedAck {
+    #[cfg(feature = "remoting")]
+    pub(crate) fn new(sender: SyncSender<()>) -> Self {
+        Self(sender)
+    }
+
+    fn acknowledge(self) {
+        let _ = self.0.send(());
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct MailboxEntry<Msg: LocalMessage> {
+    pub(crate) envelope: Envelope<Msg>,
+    processed_ack: Option<ProcessedAck>,
+}
+
 pub struct MailboxSender<Msg: LocalMessage> {
-    queue: QueueWriter<Msg>,
+    queue: QueueWriter<MailboxEntry<Msg>>,
     scheduled: Arc<AtomicBool>,
     #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
     diagnostics: Option<crate::console::SharedDiagnostics>,
@@ -62,20 +83,37 @@ impl<Msg> MailboxSender<Msg>
 where
     Msg: LocalMessage,
 {
-    pub fn try_enqueue(&self, msg: Envelope<Msg>) -> EnqueueResult<Msg> {
+    pub fn try_enqueue(&self, msg: Envelope<Msg>) -> EnqueueResult<Envelope<Msg>> {
+        self.try_enqueue_with_ack(msg, None)
+            .map_err(|error| EnqueueError {
+                msg: error.msg.envelope,
+            })
+    }
+
+    pub(crate) fn try_enqueue_with_ack(
+        &self,
+        msg: Envelope<Msg>,
+        processed_ack: Option<ProcessedAck>,
+    ) -> Result<(), EnqueueError<MailboxEntry<Msg>>> {
         #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
         if let Some(diagnostics) = &self.diagnostics {
             let mut entry = crate::console::message_event(diagnostics, &msg, "enqueued");
             let mut state = diagnostics.lock().unwrap();
             // Keep enqueue and history ordering consistent with console clears and dequeues.
-            let result = self.queue.try_enqueue(msg);
+            let result = self.queue.try_enqueue(MailboxEntry {
+                envelope: msg,
+                processed_ack,
+            });
             if result.is_err() {
                 entry["event"] = serde_json::json!("delivery_failed");
             }
             state.push(entry);
             return result;
         }
-        self.queue.try_enqueue(msg)
+        self.queue.try_enqueue(MailboxEntry {
+            envelope: msg,
+            processed_ack,
+        })
     }
 }
 
@@ -128,8 +166,8 @@ impl<Msg: LocalMessage> Clone for Mailbox<Msg> {
 
 pub struct MailboxInner<Msg: LocalMessage> {
     msg_process_limit: u32,
-    queue: QueueReader<Msg>,
-    sys_queue: QueueReader<SystemMsg>,
+    queue: QueueReader<MailboxEntry<Msg>>,
+    sys_queue: QueueReader<MailboxEntry<SystemMsg>>,
     suspended: Arc<AtomicBool>,
     scheduled: Arc<AtomicBool>,
     #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
@@ -139,11 +177,14 @@ pub struct MailboxInner<Msg: LocalMessage> {
 impl<Msg: LocalMessage> Mailbox<Msg> {
     #[allow(dead_code)]
     pub fn try_dequeue(&self) -> Result<Envelope<Msg>, QueueEmpty> {
-        self.inner.queue.try_dequeue()
+        self.inner.queue.try_dequeue().map(|entry| entry.envelope)
     }
 
     pub fn sys_try_dequeue(&self) -> Result<Envelope<SystemMsg>, QueueEmpty> {
-        self.inner.sys_queue.try_dequeue()
+        self.inner
+            .sys_queue
+            .try_dequeue()
+            .map(|entry| entry.envelope)
     }
 
     pub fn has_msgs(&self) -> bool {
@@ -188,21 +229,22 @@ impl<Msg: LocalMessage> Mailbox<Msg> {
         false
     }
 
-    fn try_process_dequeue(&self) -> Result<Envelope<Msg>, QueueEmpty> {
+    fn try_process_dequeue(&self) -> Result<MailboxEntry<Msg>, QueueEmpty> {
         #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
         {
             let state = self.diagnostics().lock().unwrap();
             if state.paused {
                 return Err(QueueEmpty);
             }
-            let envelope = self.try_dequeue()?;
+            let entry = self.inner.queue.try_dequeue()?;
             drop(state);
-            let event = crate::console::message_event(self.diagnostics(), &envelope, "received");
+            let event =
+                crate::console::message_event(self.diagnostics(), &entry.envelope, "received");
             self.diagnostics().lock().unwrap().push(event);
-            Ok(envelope)
+            Ok(entry)
         }
         #[cfg(not(all(feature = "console", not(target_arch = "wasm32"))))]
-        self.try_dequeue()
+        self.inner.queue.try_dequeue()
     }
 }
 
@@ -225,8 +267,8 @@ pub fn mailbox<Msg>(
 where
     Msg: LocalMessage,
 {
-    let (qw, qr) = queue::<Msg>();
-    let (sqw, sqr) = queue::<SystemMsg>();
+    let (qw, qr) = queue::<MailboxEntry<Msg>>();
+    let (sqw, sqr) = queue::<MailboxEntry<SystemMsg>>();
 
     let scheduled = Arc::new(AtomicBool::new(false));
     #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
@@ -314,7 +356,11 @@ fn process_msgs<A>(
         if count < mbox.msg_process_limit() && actor.is_some() && !mbox.is_suspended() {
             match mbox.try_process_dequeue() {
                 Ok(msg) => {
-                    let (msg, sender) = (msg.msg, msg.sender);
+                    let MailboxEntry {
+                        envelope,
+                        processed_ack,
+                    } = msg;
+                    let (msg, sender) = (envelope.msg, envelope.sender);
                     #[cfg(feature = "tracing")]
                     let _span = tracing::trace_span!(
                         target: "picard::messaging",
@@ -324,6 +370,9 @@ fn process_msgs<A>(
                     )
                     .entered();
                     actor.as_mut().unwrap().recv(ctx, msg, sender);
+                    if let Some(ack) = processed_ack {
+                        ack.acknowledge();
+                    }
                     process_sys_msgs(mbox, ctx, cell, actor);
 
                     count += 1;
