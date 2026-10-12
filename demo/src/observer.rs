@@ -13,8 +13,11 @@ use picard::actors::{
 use crate::metrics::Metrics;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ObserverMsg {
+    #[cfg_attr(feature = "serde", serde(skip))]
     SystemEvent(SystemEvent),
+    #[cfg_attr(feature = "serde", serde(skip))]
     DeadLetter(DeadLetter),
 }
 

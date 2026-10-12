@@ -33,6 +33,7 @@ pub struct GatewayArgs {
 pub struct Gateway {
     args: GatewayArgs,
     snapshots: BTreeMap<usize, Arc<DistrictSnapshot>>,
+    generations: BTreeMap<usize, u64>,
     paused: bool,
     target: usize,
     inspect: Option<(String, String)>,
@@ -44,6 +45,7 @@ impl ActorFactoryArgs<GatewayArgs> for Gateway {
         Self {
             args,
             snapshots: BTreeMap::new(),
+            generations: BTreeMap::new(),
             paused: false,
             target: 0,
             inspect: None,
@@ -66,6 +68,12 @@ impl Actor for Gateway {
     }
 
     fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
+        self.handle(msg);
+    }
+}
+
+impl Gateway {
+    fn handle(&mut self, msg: GatewayMsg) {
         self.args.metrics.inc(&self.args.metrics.processed);
         match msg {
             GatewayMsg::Flush => {
@@ -80,9 +88,19 @@ impl Actor for Gateway {
                 let _ = self.args.tx.send(Arc::new(frame));
             }
             GatewayMsg::Snapshot(snapshot) => {
-                self.snapshots.insert(snapshot.district, snapshot);
+                if self.generations.get(&snapshot.district) == Some(&snapshot.generation) {
+                    self.snapshots.insert(snapshot.district, snapshot);
+                }
+            }
+            GatewayMsg::DistrictStarted {
+                district,
+                generation,
+            } => {
+                self.generations.insert(district, generation);
+                self.snapshots.remove(&district);
             }
             GatewayMsg::DistrictGone(index) => {
+                self.generations.remove(&index);
                 self.snapshots.remove(&index);
             }
             GatewayMsg::InspectReply { id, json } => self.inspect = Some((id, json)),
@@ -91,5 +109,49 @@ impl Actor for Gateway {
                 self.target = target;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn late_snapshots_cannot_restore_removed_or_replaced_districts() {
+        let (tx, frames) = watch::channel(Arc::new(Frame::default()));
+        let mut gateway = Gateway::create_args(GatewayArgs {
+            tx,
+            metrics: Arc::new(Metrics::default()),
+        });
+        let old = Arc::new(DistrictSnapshot {
+            district: 4,
+            generation: 1,
+            ..DistrictSnapshot::default()
+        });
+        gateway.handle(GatewayMsg::DistrictStarted {
+            district: 4,
+            generation: 1,
+        });
+        gateway.handle(GatewayMsg::Snapshot(old.clone()));
+        gateway.handle(GatewayMsg::Flush);
+        assert_eq!(frames.borrow().districts.len(), 1);
+        gateway.handle(GatewayMsg::DistrictGone(4));
+        gateway.handle(GatewayMsg::Snapshot(old.clone()));
+        gateway.handle(GatewayMsg::Flush);
+        assert!(frames.borrow().districts.is_empty());
+        gateway.handle(GatewayMsg::DistrictStarted {
+            district: 4,
+            generation: 2,
+        });
+        let new = Arc::new(DistrictSnapshot {
+            district: 4,
+            generation: 2,
+            ..DistrictSnapshot::default()
+        });
+        gateway.handle(GatewayMsg::Snapshot(new));
+        gateway.handle(GatewayMsg::Snapshot(old));
+        gateway.handle(GatewayMsg::Flush);
+        assert_eq!(frames.borrow().districts.len(), 1);
+        assert_eq!(frames.borrow().districts[0].generation, 2);
     }
 }

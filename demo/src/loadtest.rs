@@ -17,6 +17,11 @@ fn vehicles(frame: &Frame) -> usize {
 /// Panics if the simulation cannot be started.
 pub async fn run(sizes: &[usize], secs: Duration) -> String {
     let sim = Sim::start(0).expect("start simulation");
+    run_sim(&sim, sizes, secs).await
+}
+
+/// Runs the load test against an existing simulation.
+pub async fn run_sim(sim: &Sim, sizes: &[usize], secs: Duration) -> String {
     let mut sampler = Sampler::new(sim.metrics.clone());
     let mut out = String::from(
         "| vehicles | actors | msgs sent/s | msgs processed/s | tick delay mean (µs) | tick delay p95 (µs) \

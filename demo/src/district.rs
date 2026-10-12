@@ -29,6 +29,7 @@ const SPAWN_BATCH: usize = 250;
 #[derive(Clone)]
 pub struct DistrictArgs {
     pub index: usize,
+    pub generation: u64,
     /// Distinguishes vehicle ids across district generations.
     pub id_base: u64,
     pub supervisor: ActorRef<SupervisorMsg>,
@@ -131,6 +132,7 @@ impl District {
     fn publish(&mut self) {
         let snapshot = DistrictSnapshot {
             district: self.args.index,
+            generation: self.args.generation,
             vehicles: self.vehicle_views.values().copied().collect(),
             junctions: self.junction_views.values().copied().collect(),
             target: self.target,
@@ -297,7 +299,9 @@ impl Actor for District {
                 }
             }
             DistrictMsg::JunctionReport(view) => {
-                self.junction_views.insert(view.node, view);
+                if self.junctions.contains_key(&view.node) {
+                    self.junction_views.insert(view.node, view);
+                }
             }
             DistrictMsg::Fault { id, fault } => self.route_fault(&id, fault),
             DistrictMsg::Inspect { id, req } => self.route_inspect(&id, req),

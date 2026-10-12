@@ -42,6 +42,11 @@ struct AppState {
 /// cannot be bound, or the server fails.
 pub async fn serve(addr: SocketAddr, vehicles: usize) -> Result<(), String> {
     let sim = Sim::start(vehicles)?;
+    serve_sim(addr, sim).await
+}
+
+/// Runs the web server using an existing simulation, until Ctrl-C.
+pub async fn serve_sim(addr: SocketAddr, sim: Sim) -> Result<(), String> {
     let (tx, frames) = watch::channel::<Arc<str>>(Arc::from("{}"));
     let state = Arc::new(AppState {
         bridge: Mutex::new(Bridge::new(sim)),
@@ -49,24 +54,26 @@ pub async fn serve(addr: SocketAddr, vehicles: usize) -> Result<(), String> {
         hello: hello(),
     });
 
-    tokio::spawn(broadcaster(state.clone(), tx));
-
     let app = Router::new()
         .route("/", get(|| async { Html(INDEX_HTML) }))
         .route("/ws", get(ws_handler))
         .route("/api/metrics", get(metrics_handler))
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|e| format!("cannot bind {addr}: {e}"))?;
-    println!("Living City running at http://{addr}");
-    axum::serve(listener, app)
+    let bound_address = listener.local_addr().map_err(|err| err.to_string())?;
+    println!("Living City running at http://{bound_address}");
+    let broadcaster = tokio::spawn(broadcaster(state.clone(), tx));
+    let result = axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    broadcaster.abort();
+    result
 }
 
 async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {

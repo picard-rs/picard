@@ -15,6 +15,7 @@ pub const DISTRICT_COUNT: usize = (GRID_DISTRICTS * GRID_DISTRICTS) as usize;
 pub const DEFAULT_ACTIVE: [usize; 4] = [0, 1, 3, 4];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Node {
     pub x: i16,
     pub y: i16,
@@ -22,6 +23,7 @@ pub struct Node {
 
 /// The axis a vehicle travels along. `Ns` is vertical travel, `Ew` is horizontal travel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Axis {
     Ns,
     Ew,

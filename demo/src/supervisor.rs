@@ -68,6 +68,7 @@ impl Supervisor {
         self.generation += 1;
         let args = DistrictArgs {
             index,
+            generation: self.generation,
             id_base: (self.generation << 40) | ((index as u64) << 32),
             supervisor: ctx.myself(),
             gateway: self.args.gateway.clone(),
@@ -76,6 +77,13 @@ impl Supervisor {
         let name = format!("district-{index}-g{}", self.generation);
         if let Ok(district) = ctx.actor_of_args::<District, _>(&name, args) {
             self.args.metrics.inc(&self.args.metrics.created);
+            self.args.gateway.tell(
+                GatewayMsg::DistrictStarted {
+                    district: index,
+                    generation: self.generation,
+                },
+                None,
+            );
             self.districts.insert(index, district);
         }
     }

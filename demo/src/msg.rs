@@ -12,14 +12,17 @@ pub type VehicleId = u64;
 
 /// Simulation clock pulse. `sent` lets receivers measure how long the message waited.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Tick {
     pub dt: f32,
+    #[cfg_attr(feature = "serde", serde(skip, default = "Instant::now"))]
     pub sent: Instant,
     /// True on ticks where actors should send a state report towards the browser.
     pub report: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Fault {
     /// The actor stops itself: nothing restarts it.
     Terminate,
@@ -73,19 +76,32 @@ impl fmt::Debug for Directory {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum VehicleMsg {
     Tick(Tick),
-    EntryGranted { node: Node },
-    EntryDenied { node: Node, queue_pos: u32 },
-    TrafficSignalChanged { node: Node, green: Option<Axis> },
+    EntryGranted {
+        node: Node,
+    },
+    EntryDenied {
+        node: Node,
+        queue_pos: u32,
+    },
+    TrafficSignalChanged {
+        node: Node,
+        green: Option<Axis>,
+    },
+    #[cfg_attr(feature = "serde", serde(skip))]
     Directory(Arc<Directory>),
     Fault(Fault),
+    #[cfg_attr(feature = "serde", serde(skip))]
     Inspect(InspectReq),
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum JunctionMsg {
     Tick(Tick),
+    #[cfg_attr(feature = "serde", serde(skip))]
     RequestIntersectionEntry {
         vehicle: ActorRef<VehicleMsg>,
         id: VehicleId,
@@ -96,21 +112,29 @@ pub enum JunctionMsg {
     },
     TrafficSignalChanged(Signal),
     Fault(Fault),
+    #[cfg_attr(feature = "serde", serde(skip))]
     Inspect(InspectReq),
+    #[cfg_attr(feature = "serde", serde(skip))]
     InspectLight(InspectReq),
     FaultLight(Fault),
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LightMsg {
     Tick(Tick),
-    Demand { ns: u32, ew: u32 },
+    Demand {
+        ns: u32,
+        ew: u32,
+    },
     Fault(Fault),
+    #[cfg_attr(feature = "serde", serde(skip))]
     Inspect(InspectReq),
 }
 
 /// Which axis (if any) may currently enter the junction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Signal {
     pub green: Option<Axis>,
     pub yellow: bool,
@@ -129,9 +153,12 @@ impl Signal {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DistrictMsg {
     Tick(Tick),
+    #[cfg_attr(feature = "serde", serde(skip))]
     Directory(Arc<Directory>),
+    #[cfg_attr(feature = "serde", serde(skip))]
     NeedDirectory(ActorRef<VehicleMsg>),
     SetTarget(usize),
     Surge(usize),
@@ -142,11 +169,13 @@ pub enum DistrictMsg {
         id: String,
         fault: Fault,
     },
+    #[cfg_attr(feature = "serde", serde(skip))]
     Inspect {
         id: String,
         req: InspectReq,
     },
     /// Only needed so the district can subscribe to system events; they arrive via `sys_recv`.
+    #[cfg_attr(feature = "serde", serde(skip))]
     SystemEvent(SystemEvent),
 }
 
@@ -157,6 +186,7 @@ impl From<SystemEvent> for DistrictMsg {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SupervisorMsg {
     Tick,
     Pause(bool),
@@ -165,6 +195,7 @@ pub enum SupervisorMsg {
     Surge(usize),
     AddDistrict(usize),
     RemoveDistrict(usize),
+    #[cfg_attr(feature = "serde", serde(skip))]
     DistrictReady {
         district: usize,
         junctions: Vec<(Node, ActorRef<JunctionMsg>)>,
@@ -179,9 +210,11 @@ pub enum SupervisorMsg {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GatewayMsg {
     Flush,
     Snapshot(Arc<DistrictSnapshot>),
+    DistrictStarted { district: usize, generation: u64 },
     DistrictGone(usize),
     InspectReply { id: String, json: String },
     Status { paused: bool, target: usize },
@@ -196,6 +229,7 @@ pub mod state {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VehicleView {
     pub id: VehicleId,
     pub from: Node,
@@ -205,6 +239,7 @@ pub struct VehicleView {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct JunctionView {
     pub node: Node,
     pub signal: Signal,
@@ -214,8 +249,10 @@ pub struct JunctionView {
 }
 
 #[derive(Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DistrictSnapshot {
     pub district: usize,
+    pub generation: u64,
     pub vehicles: Vec<VehicleView>,
     pub junctions: Vec<JunctionView>,
     pub target: usize,

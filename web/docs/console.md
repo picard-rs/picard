@@ -88,6 +88,20 @@ History is stored at `$XDG_STATE_HOME/picard-console/history`, or
 because payloads may be sensitive. Connection and protocol errors are explicit;
 there is no automatic reconnect or retry of destructive operations.
 
+### Living City
+
+The Living City demo forwards its `console` and `serde` features to Picard.
+Start its optional endpoint with `--console-listen 127.0.0.1:9000` and set
+`PICARD_CONSOLE_TOKEN` in the environment:
+
+```sh
+cargo run -p living-city --release --features console,serde -- \
+  --console-listen 127.0.0.1:9000
+```
+
+The same option works with `loadtest`. See the [Living City guide](../../demo/GUIDE.md)
+for Clap environment options and its JSON message compatibility.
+
 ## Inspection and management semantics
 
 - `actors` lists registered actors, including runtime actors. Each entry has

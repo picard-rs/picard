@@ -10,6 +10,75 @@ cargo run -p living-city --release            # then open http://127.0.0.1:8080
 cargo run -p living-city --release -- --port 9000 --vehicles 1000 --host 0.0.0.0
 ```
 
+Arguments are parsed with Clap. `--help` and `loadtest --help` describe each
+mode; malformed values and unknown arguments return an error instead of falling
+back to defaults. Server options can also be set with `LIVING_CITY_HOST`,
+`LIVING_CITY_PORT`, and `LIVING_CITY_VEHICLES`. Load-test options use
+`LIVING_CITY_LOADTEST_VEHICLES` (comma-separated counts) and
+`LIVING_CITY_LOADTEST_SECS`. Command-line options override environment variables.
+IPv6 hosts are supported, for example `--host ::1`.
+
+### Runtime console
+
+Living City's `console` and `serde` features forward to `picard/console` and
+`picard/serde`. Enable `console` for inspection and management, and additionally
+enable `serde` for typed JSON sends:
+
+```sh
+# Set PICARD_CONSOLE_TOKEN to the same strong, unpredictable token in both terminals.
+cargo run -p living-city --release --features console,serde -- \
+  --console-listen 127.0.0.1:9000
+cargo run -p picard-console -- ws://127.0.0.1:9000/console
+```
+
+The endpoint is opt-in: enabling the feature alone does not open a console port.
+`--console-listen IP:PORT` (or `PICARD_CONSOLE_LISTEN`) accepts only loopback
+addresses. Port `0` selects an available port, printed at startup. A bearer token
+is required when a listen address is supplied. Set `PICARD_CONSOLE_TOKEN` rather
+than using `--console-token`, which can expose the token in shell history and
+process listings. Tokens must contain at least 32 ASCII letters, digits, `-` or
+`_`; environment token values are hidden in Clap help.
+
+Both options are available only with `console` and work in either mode, including:
+
+```sh
+cargo run -p living-city --release --features console,serde -- \
+  loadtest --vehicles 1000,5000 --secs 20 --console-listen 127.0.0.1:9000
+```
+
+The console handle remains alive for the whole server or load-test run. Startup
+and shutdown errors are reported, and the listener and actor system are stopped
+when the run finishes. The runtime console is separate from the browser's `/ws`
+visualization endpoint. Use a secure tunnel for remote access.
+
+Example REPL commands:
+
+```text
+inspect /user/supervisor
+send /user/supervisor {"Pause":true}
+send /user/supervisor {"SetVehicles":1000}
+send /user/supervisor {"Inspect":{"id":"v-1"}}
+send /user/supervisor {"Pause":false}
+```
+
+Data/control message variants support their normal serde JSON representation.
+Variants carrying actor references are deliberately excluded from serialization
+and deserialization: vehicle `Directory`/`Inspect`; junction
+`RequestIntersectionEntry`/`Inspect`/`InspectLight`; light `Inspect`; district
+`Directory`/`NeedDirectory`/`Inspect`/`SystemEvent`; supervisor `DistrictReady`;
+and both observer variants. They continue to work as ordinary in-process messages.
+JSON sends of these variants return `invalid_message`; console history records a
+`payload_error` for them.
+
+Tick messages serialize `dt` and `report`, not the process-local monotonic
+`sent` timestamp. JSON deserialization initializes `sent` to the current local
+time. Normal typed tick delivery keeps its original timestamp and latency
+measurements unchanged. Console history/serialization adds overhead; compare
+load tests with the same feature configuration.
+
+See the [runtime console documentation](../web/docs/console.md) for protocol,
+limits, completion, and mailbox control semantics.
+
 ### In the browser (WebAssembly)
 
 The same simulation also runs entirely in the browser, which is how it is published on GitHub
@@ -49,6 +118,9 @@ scaling and a traffic surge.
   it. `violations` must stay 0 (a unit test fuzzes this and the integration tests assert it).
 - **Addresses**: an immutable directory of junction refs is rebuilt by the supervisor when the
   topology changes and pushed to districts and vehicles.
+- **Snapshots** carry a district generation. The gateway accepts only snapshots from
+  active generations, and districts ignore reports from removed junctions, so delayed
+  reports cannot bring terminated actors back into the visualization.
 - **Web layer** (`src/server.rs`) is thin: it reads the latest frame published by the gateway
   actor through a `tokio::sync::watch` channel and turns browser commands into supervisor
   messages. It cannot touch actor state, and rendering is fully decoupled from simulation.
@@ -95,6 +167,7 @@ Removing a district stops all of its descendants through Picard's hierarchical s
 
 ```sh
 cargo test -p living-city              # unit tests + end-to-end scenarios with real actors
+cargo test -p living-city --all-features # also CLI/console and serde tests
 ```
 
 `demo/tests/simulation.rs` covers: trips complete with zero safety violations, killing and
