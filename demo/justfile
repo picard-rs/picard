@@ -21,6 +21,13 @@ token:
         echo "LIVING_CITY_REMOTE_TOKEN=$(openssl rand -hex 32)" >> .env
         echo "created demo/.env"
     fi
+    if ! grep -q '^LIVING_CITY_CONSOLE_TOKEN=' .env; then
+        echo "LIVING_CITY_CONSOLE_TOKEN=$(openssl rand -hex 32)" >> .env
+    fi
+
+# Open the Picard console of a district (default 0), e.g. `just console 3`
+console district="0": token
+    docker compose exec -it district-{{ district }} picard-console ws://127.0.0.1:9000/console
 
 # Build and start one container per district; UI on http://127.0.0.1:8080 (override with LIVING_CITY_PORT)
 up: token

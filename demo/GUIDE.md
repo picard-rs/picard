@@ -59,7 +59,10 @@ With [just](https://just.systems), run these from `demo/`: `just up` creates a
 git-ignored `.env` with a random shared token (if missing) and starts the
 nine containers; `just down`, `just restart`, `just logs [service]` and
 `just ps` manage them. The UI is published on host port 8080; set
-`LIVING_CITY_PORT` (for example in `.env`) if that port is taken. `just run` and `just loadtest` start the single-process
+`LIVING_CITY_PORT` (for example in `.env`) if that port is taken. `just console [district]` opens the Picard console of that district
+(default 0): each container runs the console on its own loopback address, which
+is never published, and `picard-console` ships in the image and is run via
+`docker compose exec` using `LIVING_CITY_CONSOLE_TOKEN` from `.env`. `just run` and `just loadtest` start the single-process
 demo. Without `just`, build and run the nine-container example manually:
 
 ```sh
