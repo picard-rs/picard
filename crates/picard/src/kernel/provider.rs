@@ -1,3 +1,5 @@
+#[cfg(feature = "remoting")]
+use dashmap::DashMap;
 use dashmap::DashSet;
 use slog::trace;
 
@@ -24,14 +26,22 @@ pub struct Provider {
 
 struct ProviderInner {
     paths: DashSet<ActorPath>,
+    #[cfg(feature = "remoting")]
+    remote_dispatchers: DashMap<ActorPath, RemoteDispatcher>,
     #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
     console: crate::console::Registry,
 }
+
+#[cfg(feature = "remoting")]
+type RemoteDispatcher =
+    Arc<dyn Fn(serde_json::Value) -> Result<(), crate::remoting::RemoteError> + Send + Sync>;
 
 impl Provider {
     pub fn new() -> Self {
         let inner = ProviderInner {
             paths: DashSet::new(),
+            #[cfg(feature = "remoting")]
+            remote_dispatchers: DashMap::new(),
             #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
             console: crate::console::Registry::default(),
         };
@@ -53,6 +63,8 @@ impl Provider {
         A::Msg: crate::Message,
     {
         let (actor, stop) = self.create_uninitialized_actor(props, name, parent, sys)?;
+        #[cfg(feature = "remoting")]
+        self.register_remote_actor(actor.clone());
         #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
         self.console().enable_management(actor.path().as_str());
         #[cfg(all(feature = "console", feature = "serde", not(target_arch = "wasm32")))]
@@ -145,8 +157,53 @@ impl Provider {
 
     pub fn unregister(&self, path: &ActorPath) {
         self.inner.paths.remove(path);
+        #[cfg(feature = "remoting")]
+        self.inner.remote_dispatchers.remove(path);
         #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
         self.inner.console.remove(path.as_str());
+    }
+
+    #[cfg(feature = "remoting")]
+    fn register_remote_actor<Msg>(&self, actor: ActorRef<Msg>)
+    where
+        Msg: crate::Message,
+    {
+        let path = actor.path().clone();
+        let target = BasicActorRef::from(actor);
+        self.inner.remote_dispatchers.insert(
+            path,
+            Arc::new(move |payload| {
+                let msg = serde_json::from_value::<Msg>(payload)
+                    .map_err(|err| crate::remoting::RemoteError::InvalidMessage(err.to_string()))?;
+                target
+                    .try_tell(msg, None)
+                    .map_err(|err| crate::remoting::RemoteError::Rejected(format!("{err:?}")))
+            }),
+        );
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn dispatch_remote(
+        &self,
+        system_id: uuid::Uuid,
+        request: &crate::remoting::RemoteRequest,
+    ) -> Result<(), crate::remoting::RemoteError> {
+        if request.destination.system_id != system_id {
+            return Err(crate::remoting::RemoteError::Rejected(
+                "destination system ID does not match this system".into(),
+            ));
+        }
+        if request.sender.is_some() {
+            return Err(crate::remoting::RemoteError::UnsupportedSender);
+        }
+        let path = ActorPath::new(&request.destination.path);
+        self.inner
+            .remote_dispatchers
+            .get(&path)
+            .map(|dispatcher| dispatcher.clone())
+            .ok_or_else(|| crate::remoting::RemoteError::ActorNotFound(path.to_string()))?(
+            request.payload.clone(),
+        )
     }
 
     #[cfg(all(feature = "console", not(target_arch = "wasm32")))]

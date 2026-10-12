@@ -448,6 +448,90 @@ impl ActorSystem {
         self.proto.id
     }
 
+    /// Connect to a remote system using the built-in authenticated WebSocket
+    /// transport.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    #[must_use]
+    pub fn connect_remote(
+        &self,
+        peer: crate::remoting::RemotePeer,
+    ) -> crate::remoting::RemoteConnection {
+        self.connect_remote_with(
+            peer,
+            std::sync::Arc::new(crate::remoting::WebSocketTransport),
+        )
+    }
+
+    /// Connect to a remote system using a caller-supplied bidirectional
+    /// transport.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    #[must_use]
+    pub fn connect_remote_with(
+        &self,
+        peer: crate::remoting::RemotePeer,
+        transport: std::sync::Arc<dyn crate::remoting::RemoteTransport>,
+    ) -> crate::remoting::RemoteConnection {
+        crate::remoting::RemoteConnection::with_transport(peer, transport)
+    }
+
+    /// Listen for authenticated remote requests using the built-in WebSocket
+    /// transport. The handler is called only after peer authentication.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    pub fn listen_remote(
+        &self,
+        bind: std::net::SocketAddr,
+        authenticator: crate::remoting::PeerAuthenticator,
+        handler: crate::remoting::RemoteHandler,
+    ) -> Result<Box<dyn crate::remoting::RemoteListener>, crate::remoting::RemoteError> {
+        self.listen_remote_with(
+            bind,
+            authenticator,
+            handler,
+            std::sync::Arc::new(crate::remoting::WebSocketTransport),
+        )
+    }
+
+    /// Listen for authenticated remote requests and route them to local actors
+    /// by their registered actor path and serialized message type.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    pub fn listen_remote_actors(
+        &self,
+        bind: std::net::SocketAddr,
+        authenticator: crate::remoting::PeerAuthenticator,
+    ) -> Result<Box<dyn crate::remoting::RemoteListener>, crate::remoting::RemoteError> {
+        self.listen_remote(bind, authenticator, self.remote_handler())
+    }
+
+    /// Build a handler that dispatches authenticated requests to actors in
+    /// this system. Remote sender addresses are not yet routed to actor
+    /// `Sender` values and are rejected.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    #[must_use]
+    pub fn remote_handler(&self) -> crate::remoting::RemoteHandler {
+        let provider = self.provider.clone();
+        let system_id = self.id();
+        std::sync::Arc::new(move |_, request| {
+            let result = provider.dispatch_remote(system_id, &request);
+            match result {
+                Ok(()) => crate::remoting::RemoteResponse::accepted(request.id),
+                Err(error) => crate::remoting::RemoteResponse::rejected(request.id, error),
+            }
+        })
+    }
+
+    /// Listen for authenticated requests using a caller-supplied bidirectional
+    /// transport.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    pub fn listen_remote_with(
+        &self,
+        bind: std::net::SocketAddr,
+        authenticator: crate::remoting::PeerAuthenticator,
+        handler: crate::remoting::RemoteHandler,
+        transport: std::sync::Arc<dyn crate::remoting::RemoteTransport>,
+    ) -> Result<Box<dyn crate::remoting::RemoteListener>, crate::remoting::RemoteError> {
+        transport.listen(bind, authenticator, handler)
+    }
+
     /// Returns the name of the system
     #[must_use]
     pub fn name(&self) -> String {

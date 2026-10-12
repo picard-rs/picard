@@ -1,62 +1,99 @@
-# Clustering roadmap
+# Remote messaging
 
-Picard does not yet provide remote actors or clustering. The first planned
-deliverable is **native TCP remote actor messaging**: send messages to an actor
-in another Picard process using an explicit remote address. UDP, cluster
-membership and distributed data (including CRDTs) are out of scope for this
-first step.
+Picard's opt-in `remoting` feature provides versioned JSON messaging over an
+authenticated WebSocket connection. The built-in transport uses WebSocket over
+TCP, so a trusted reverse proxy can terminate TLS. Picard still authenticates
+each connecting peer with a bearer token; TLS termination does not replace peer
+authentication.
 
-## Initial scope
+This is remote message delivery, not transparent clustering. There is no
+discovery, failover, exactly-once guarantee, or automatic remote-reference
+conversion. UDP and distributed data (including CRDTs) are out of scope.
 
-The first implementation should be a small, opt-in vertical slice:
+## Enable remote messaging
 
-- Give actors an address that explicitly distinguishes local delivery from
-  remote delivery. A remote address carries the peer endpoint and the actor's
-  path on that peer.
-- Deliver supported messages over TCP while keeping local `ActorRef` behavior
-  unchanged.
-- Authenticate peers with mutual TLS. After authentication, the receiving
-  system resolves the requested path against its local actors and delivers the
-  message to that actor.
-- Use versioned, length-prefixed JSON framing for the first protocol.
-- Keep actor addresses location-aware: a local address routes through the
-  current system, while a remote address carries the peer endpoint and path.
-- Carry sender addresses so actors can reply across peers.
-- Make remote sends asynchronous and return a future that reports transport or
-  mailbox-acceptance failures.
-- Make connection failures and remote delivery failures observable to callers;
-  do not present best-effort network delivery as guaranteed local delivery.
-- Restrict the initial implementation to native targets. Browser/WASM transport
-  needs separate design and is not part of this milestone.
-- Do not claim transparent clustering, automatic discovery, failover, or
-  exactly-once delivery.
+Enable the feature in the application:
 
-## First-version API decisions
+```toml
+picard = { version = "0.4", features = ["remoting"] }
+```
 
-- Local and remote destinations will use the unified typed `ActorRef<Msg>` API,
-  with the address identifying its location.
-- The sender API will represent either local or remote senders. This changes
-  public actor receive signatures and therefore requires a major-version
-  compatibility plan.
-- Mutual-TLS client and server configurations will be supplied by the
-  application as rustls configuration objects; Picard will not load private
-  keys from its own configuration files.
-- Remote references support message delivery and replies. Hierarchy operations
-  such as parent lookup, child listing, and stopping remain local-only in the
-  first version and must fail explicitly when used on remote references.
+The feature enables Picard's `serde` message bound. Actor messages delivered
+remotely must implement `Serialize` and `DeserializeOwned`.
 
-## Decisions before implementation
+Create a receiver actor and start its authenticated WebSocket listener:
 
-Message-size limits, peer authorization policy, connection lifecycle, and the
-exact mailbox-acceptance acknowledgment semantics still need to be specified.
-The protocol versioning and framing rules should be documented and tested
-before the format is treated as stable. A TCP send will not claim delivery
-exactly once: disconnects may leave the sender uncertain whether a message was
-accepted.
+```rust,ignore
+let listener = system.listen_remote_actors(
+    "127.0.0.1:9000".parse()?,
+    PeerAuthenticator::new([("orders-client".into(), token.into())]),
+)?;
+```
 
-## Later work
+The listener binds plain HTTP. Bind it to a private interface or loopback when
+a trusted reverse proxy terminates TLS. The proxy must prevent untrusted
+clients from reaching the backend listener directly.
 
-UDP transport, cluster membership/discovery, vector-clock or other
-conflict-resolution strategies, and CRDT-backed distributed data are separate
-future milestones. Each needs its own reliability, consistency, and
-security requirements before implementation.
+Connect and deliver a serialized message:
+
+```rust,ignore
+let peer = RemotePeer::new(
+    "orders",
+    "wss://actors.example.test/remoting",
+    token,
+)?;
+let remote = system.connect_remote(peer);
+let address = ActorAddress::remote(
+    remote_system_id,
+    "wss://actors.example.test/remoting",
+    "/user/orders",
+);
+let ack = remote
+    .send(address, None, serde_json::to_value(&message)?)
+    .await?;
+```
+
+`listen_remote_actors` resolves the address's system ID and actor path against
+the local actor registry, deserializes the payload using that actor's message
+type, and acknowledges the request after it enters the mailbox. Acknowledgment
+does not mean the actor has processed the message. Unknown actors, invalid
+payloads, unsupported protocol versions, failed authentication, and transport
+errors are reported to the caller.
+
+The first API is deliberately explicit: callers construct a remote address and
+serialize the message, while local `ActorRef` values retain their existing
+behavior. A request cannot yet carry a remote sender into an actor's `Sender`;
+`listen_remote_actors` rejects requests that include one. Application-defined
+request/reply exchanges can instead use `listen_remote` with a custom
+`RemoteHandler`, which returns a `RemoteResponse` (including an optional reply
+payload).
+
+## Custom transports
+
+Applications can implement `RemoteTransport` to use their own communication
+system. A transport must support both `send` and `listen`, authenticate peers
+before dispatch, enforce the protocol frame-size limit, and preserve request
+correlation IDs. Use `ActorSystem::connect_remote_with` and
+`ActorSystem::listen_remote_with` to install it; inbound requests use the same
+handler interface as the built-in WebSocket transport.
+
+## Protocol and security boundaries
+
+- The first protocol uses versioned JSON messages and limits frames to 1 MiB.
+- Peer bearer tokens are sent in the HTTP upgrade `Authorization` header, not
+  in URLs, and are redacted from `Debug` output.
+- Use `wss://` or a private network for transport confidentiality and integrity.
+  When a proxy terminates TLS, trust and secure the proxy-to-Picard link.
+- Allow-listed peers may address any actor registered for remote delivery.
+  Authorization by actor path or message type is not yet configurable.
+- A disconnect can leave the caller uncertain whether the remote mailbox
+  accepted a message. The protocol does not promise exactly-once delivery.
+- The built-in transport opens a WebSocket connection per send. Connection
+  pooling, retries, discovery, lifecycle management, and remote actor replies
+  are future work.
+
+WebSockets are a pragmatic fit when deployments already use HTTP reverse
+proxies for TLS termination. Compared with a raw TCP protocol, they provide
+standard proxy traversal and HTTP-level peer authentication headers, at the
+cost of an HTTP upgrade and WebSocket framing. The proxy is part of the trusted
+computing base; Picard's bearer-token check remains mandatory regardless.

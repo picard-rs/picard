@@ -5,6 +5,8 @@ pub mod actor;
 pub mod console;
 pub mod kernel;
 pub mod platform;
+#[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+pub mod remoting;
 pub mod system;
 
 use std::any::Any;
