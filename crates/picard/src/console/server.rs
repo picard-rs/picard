@@ -219,9 +219,14 @@ fn client(
                 )
                 .to_json(),
             )?,
-            Ok(Message::Close(_)) | Err(Error::ConnectionClosed | Error::AlreadyClosed) => {
-                return Ok(());
+            Ok(Message::Close(_)) => {
+                // Sends the close reply that tungstenite queued.
+                return match socket.flush() {
+                    Ok(()) | Err(Error::ConnectionClosed) => Ok(()),
+                    Err(err) => Err(err.into()),
+                };
             }
+            Err(Error::ConnectionClosed | Error::AlreadyClosed) => return Ok(()),
             Ok(Message::Ping(_) | Message::Pong(_)) => socket.flush()?,
             Ok(Message::Frame(_)) => {}
             Err(Error::Io(err))
