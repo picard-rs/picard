@@ -1,6 +1,7 @@
 //! Full-screen terminal UI: actor tree, actor details, message history and a command bar.
 
 use std::{
+    collections::HashSet,
     error::Error,
     time::{Duration, Instant},
 };
@@ -24,6 +25,7 @@ use crate::{
 const REFRESH: Duration = Duration::from_secs(1);
 const KEYS: &str = "\
 Up/Down, j/k   Select an actor (PgUp/PgDn, Home/End jump)
+Right/l, Left/h  Expand / collapse the actor's children (Left on a leaf selects its parent)
 /              Filter actors by path (Enter keeps, Esc clears)
 :              Enter a command (Tab completes, Up/Down history)
 p              Pause or resume the selected actor's mailbox
@@ -34,7 +36,7 @@ x              Stop the selected actor (asks for confirmation)
 F5, Ctrl-L     Refresh now (the view also refreshes every second)
 ?              Toggle this help
 q, Ctrl-C      Quit";
-const HINTS: &str = " ↑↓ select  / filter  : command  p pause/resume  c clear  s send  r restart  x stop  ? help  q quit";
+const HINTS: &str = " ↑↓ select  ←→ collapse/expand  / filter  : command  p pause/resume  c clear  s send  r restart  x stop  ? help  q quit";
 
 /// Runs the TUI until the user quits. The terminal is restored on return and on panic.
 pub(crate) fn run(mut client: Client, url: &str, color: bool) -> Result<(), Box<dyn Error>> {
@@ -157,10 +159,19 @@ impl ActorRow {
     }
 
     /// Indented last path segment, so the sorted list reads as a tree.
-    fn tree_label(&self) -> String {
+    fn tree_label(&self, marker: &str) -> String {
         let depth = self.path.matches('/').count().saturating_sub(1);
         let name = self.path.rsplit('/').next().filter(|name| !name.is_empty());
-        format!("{}{}", "  ".repeat(depth), name.unwrap_or("/"))
+        format!("{}{marker}{}", "  ".repeat(depth), name.unwrap_or("/"))
+    }
+}
+
+/// The parent of `path`, or `None` for the root.
+fn parent_path(path: &str) -> Option<&str> {
+    match path.rfind('/')? {
+        _ if path == "/" => None,
+        0 => Some("/"),
+        index => Some(&path[..index]),
     }
 }
 
@@ -281,6 +292,7 @@ struct App {
     theme: Theme,
     actors: Vec<ActorRow>,
     selected: Option<String>,
+    expanded: HashSet<String>,
     table: TableState,
     filter: LineEdit,
     messages: Vec<Value>,
@@ -299,6 +311,7 @@ impl App {
             theme: Theme { color },
             actors: Vec::new(),
             selected: None,
+            expanded: HashSet::from(["/".to_owned()]),
             table: TableState::default(),
             filter: LineEdit::default(),
             messages: Vec::new(),
@@ -316,7 +329,59 @@ impl App {
         self.actors
             .iter()
             .filter(|actor| actor.path.to_lowercase().contains(&filter))
+            .filter(|actor| !filter.is_empty() || self.ancestors_expanded(&actor.path))
             .collect()
+    }
+
+    fn ancestors_expanded(&self, path: &str) -> bool {
+        let mut current = path;
+        while let Some(parent) = parent_path(current) {
+            if !self.expanded.contains(parent) {
+                return false;
+            }
+            current = parent;
+        }
+        true
+    }
+
+    fn has_children(&self, path: &str) -> bool {
+        self.actors
+            .iter()
+            .any(|actor| parent_path(&actor.path) == Some(path))
+    }
+
+    /// Expands the selected actor, or moves to its first child when already expanded.
+    fn expand_selected(&mut self) {
+        let Some(path) = self.selected.clone() else {
+            return;
+        };
+        if !self.filter.text.is_empty() || !self.has_children(&path) {
+            return;
+        }
+        if self.expanded.insert(path) {
+            return;
+        }
+        let index = self.table.selected().unwrap_or(0) + 1;
+        self.select_index(index);
+    }
+
+    /// Collapses the selected actor, or moves to its parent when it is already collapsed.
+    fn collapse_selected(&mut self) {
+        let Some(path) = self.selected.clone() else {
+            return;
+        };
+        if !self.filter.text.is_empty() {
+            return;
+        }
+        if self.expanded.remove(&path) {
+            return;
+        }
+        let parent = parent_path(&path).map(str::to_owned);
+        let index =
+            parent.and_then(|parent| self.visible().iter().position(|actor| actor.path == parent));
+        if let Some(index) = index {
+            self.select_index(index);
+        }
     }
 
     fn selected_row(&self) -> Option<&ActorRow> {
@@ -377,6 +442,11 @@ impl App {
     }
 
     fn select_path(&mut self, path: &str) {
+        let mut current = path;
+        while let Some(parent) = parent_path(current) {
+            self.expanded.insert(parent.to_owned());
+            current = parent;
+        }
         if !self.visible().iter().any(|actor| actor.path == path) {
             self.filter.clear();
         }
@@ -492,6 +562,8 @@ impl App {
             KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.refresh(client)?;
             }
+            KeyCode::Right | KeyCode::Char('l') => self.expand_selected(),
+            KeyCode::Left | KeyCode::Char('h') => self.collapse_selected(),
             KeyCode::Char(action @ ('p' | 'c' | 's' | 'r' | 'x')) => {
                 let Some(actor) = self.selected_row() else {
                     self.set_status(Severity::Error, "No actor selected");
@@ -658,7 +730,14 @@ impl App {
                 let label = if filtered {
                     actor.path.clone()
                 } else {
-                    actor.tree_label()
+                    let marker = if !self.has_children(&actor.path) {
+                        "  "
+                    } else if self.expanded.contains(&actor.path) {
+                        "▾ "
+                    } else {
+                        "▸ "
+                    };
+                    actor.tree_label(marker)
                 };
                 let name_style = if actor.manageable {
                     Style::new()
@@ -996,7 +1075,13 @@ mod tests {
         let mut app = App::new(&url, false);
         app.refresh(&mut client).unwrap();
         let text = screen(&mut app);
-        assert!(text.contains("worker") && text.contains(&url), "{text}");
+        assert!(!text.contains("worker") && text.contains(&url), "{text}");
+        app.select_path("/user");
+        app.on_key(key(KeyCode::Right), &mut client).unwrap();
+        assert!(screen(&mut app).contains("worker"));
+        app.on_key(key(KeyCode::Left), &mut client).unwrap();
+        assert!(!screen(&mut app).contains("worker"));
+        app.on_key(key(KeyCode::Right), &mut client).unwrap();
 
         for code in "/worker".chars().map(KeyCode::Char).chain([KeyCode::Enter]) {
             app.on_key(key(code), &mut client).unwrap();
