@@ -1,0 +1,101 @@
+services:
+  district-0:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "0", "--web-ui", "--host", "0.0.0.0", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    ports:
+      - "8080:8080"
+    expose: ["9100"]
+    depends_on:
+      - district-1
+      - district-2
+      - district-3
+      - district-4
+      - district-5
+      - district-6
+      - district-7
+      - district-8
+    restart: unless-stopped
+
+  district-1:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "1", "--connect", "0=ws://district-0:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped
+
+  district-2:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "2", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped
+
+  district-3:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "3", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped
+
+  district-4:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "4", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped
+
+  district-5:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "5", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped
+
+  district-6:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "6", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped
+
+  district-7:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "7", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped
+
+  district-8:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    command: ["--district", "8", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting"]
+    environment:
+      LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+    expose: ["9100"]
+    restart: unless-stopped

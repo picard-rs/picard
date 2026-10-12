@@ -15,6 +15,8 @@ pub mod metrics;
 pub mod msg;
 pub mod observer;
 pub mod protocol;
+#[cfg(feature = "remoting")]
+pub mod remoting;
 pub mod sampler;
 #[cfg(feature = "server")]
 pub mod server;

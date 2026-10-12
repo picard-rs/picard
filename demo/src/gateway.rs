@@ -12,6 +12,11 @@ use crate::{
     metrics::Metrics,
     msg::{DistrictSnapshot, GatewayMsg},
 };
+#[cfg(feature = "remoting")]
+use crate::{
+    msg::RemoteUpdate,
+    remoting::{GATEWAY_PATH, PeerLink},
+};
 
 pub const FRAME_PERIOD: Duration = Duration::from_millis(100);
 
@@ -28,6 +33,8 @@ pub struct Frame {
 pub struct GatewayArgs {
     pub tx: watch::Sender<Arc<Frame>>,
     pub metrics: Arc<Metrics>,
+    #[cfg(feature = "remoting")]
+    pub district: Option<usize>,
 }
 
 pub struct Gateway {
@@ -38,6 +45,14 @@ pub struct Gateway {
     target: usize,
     inspect: Option<(String, String)>,
     seq: u64,
+    #[cfg(feature = "remoting")]
+    remote_peers: Vec<PeerLink>,
+    #[cfg(feature = "remoting")]
+    local_paused: bool,
+    #[cfg(feature = "remoting")]
+    local_target: usize,
+    #[cfg(feature = "remoting")]
+    remote_status: BTreeMap<usize, (bool, usize)>,
 }
 
 impl ActorFactoryArgs<GatewayArgs> for Gateway {
@@ -50,6 +65,14 @@ impl ActorFactoryArgs<GatewayArgs> for Gateway {
             target: 0,
             inspect: None,
             seq: 0,
+            #[cfg(feature = "remoting")]
+            remote_peers: Vec::new(),
+            #[cfg(feature = "remoting")]
+            local_paused: false,
+            #[cfg(feature = "remoting")]
+            local_target: 0,
+            #[cfg(feature = "remoting")]
+            remote_status: BTreeMap::new(),
         }
     }
 }
@@ -88,25 +111,139 @@ impl Gateway {
                 let _ = self.args.tx.send(Arc::new(frame));
             }
             GatewayMsg::Snapshot(snapshot) => {
-                if self.generations.get(&snapshot.district) == Some(&snapshot.generation) {
-                    self.snapshots.insert(snapshot.district, snapshot);
-                }
+                #[cfg(feature = "remoting")]
+                self.relay(RemoteUpdate::Snapshot(snapshot.clone()));
+                self.apply_snapshot(snapshot);
             }
             GatewayMsg::DistrictStarted {
                 district,
                 generation,
             } => {
-                self.generations.insert(district, generation);
-                self.snapshots.remove(&district);
+                #[cfg(feature = "remoting")]
+                self.relay(RemoteUpdate::DistrictStarted {
+                    district,
+                    generation,
+                });
+                self.apply_district_started(district, generation);
             }
             GatewayMsg::DistrictGone(index) => {
-                self.generations.remove(&index);
-                self.snapshots.remove(&index);
+                #[cfg(feature = "remoting")]
+                self.relay(RemoteUpdate::DistrictGone(index));
+                self.apply_district_gone(index);
             }
-            GatewayMsg::InspectReply { id, json } => self.inspect = Some((id, json)),
+            GatewayMsg::InspectReply { id, json } => {
+                #[cfg(feature = "remoting")]
+                self.relay(RemoteUpdate::InspectReply {
+                    id: id.clone(),
+                    json: json.clone(),
+                });
+                self.inspect = Some((id, json));
+            }
             GatewayMsg::Status { paused, target } => {
-                self.paused = paused;
-                self.target = target;
+                #[cfg(feature = "remoting")]
+                {
+                    self.local_paused = paused;
+                    self.local_target = target;
+                    self.recompute_status();
+                    if let Some(district) = self.args.district {
+                        self.relay(RemoteUpdate::Status {
+                            district,
+                            paused,
+                            target,
+                        });
+                    }
+                }
+                #[cfg(not(feature = "remoting"))]
+                {
+                    self.paused = paused;
+                    self.target = target;
+                }
+            }
+            #[cfg(feature = "remoting")]
+            GatewayMsg::SetRemotePeers(peers) => {
+                self.remote_peers = peers;
+                if let Some(district) = self.args.district {
+                    self.relay(RemoteUpdate::Status {
+                        district,
+                        paused: self.local_paused,
+                        target: self.local_target,
+                    });
+                }
+            }
+            #[cfg(feature = "remoting")]
+            GatewayMsg::RemoteUpdate(update) => self.apply_remote_update(update),
+        }
+    }
+}
+
+impl Gateway {
+    fn apply_snapshot(&mut self, snapshot: Arc<DistrictSnapshot>) {
+        if self.generations.get(&snapshot.district) == Some(&snapshot.generation) {
+            self.snapshots.insert(snapshot.district, snapshot);
+        }
+    }
+
+    fn apply_district_started(&mut self, district: usize, generation: u64) {
+        self.generations.insert(district, generation);
+        self.snapshots.remove(&district);
+    }
+
+    fn apply_district_gone(&mut self, district: usize) {
+        self.generations.remove(&district);
+        self.snapshots.remove(&district);
+    }
+
+    #[cfg(feature = "remoting")]
+    fn apply_remote_update(&mut self, update: RemoteUpdate) {
+        match update {
+            RemoteUpdate::Snapshot(snapshot) => {
+                self.generations
+                    .entry(snapshot.district)
+                    .or_insert(snapshot.generation);
+                self.apply_snapshot(snapshot);
+            }
+            RemoteUpdate::DistrictStarted {
+                district,
+                generation,
+            } => self.apply_district_started(district, generation),
+            RemoteUpdate::DistrictGone(district) => self.apply_district_gone(district),
+            RemoteUpdate::InspectReply { id, json } => self.inspect = Some((id, json)),
+            RemoteUpdate::Status {
+                district,
+                paused,
+                target,
+            } => {
+                self.remote_status.insert(district, (paused, target));
+                self.recompute_status();
+            }
+        }
+    }
+
+    #[cfg(feature = "remoting")]
+    fn recompute_status(&mut self) {
+        self.paused = self.local_paused
+            && self.remote_peers.iter().all(|peer| {
+                self.remote_status
+                    .get(&peer.district)
+                    .is_some_and(|(paused, _)| *paused)
+            });
+        self.target = self.local_target
+            + self
+                .remote_status
+                .values()
+                .map(|(_, target)| *target)
+                .sum::<usize>();
+    }
+
+    #[cfg(feature = "remoting")]
+    fn relay(&self, update: RemoteUpdate) {
+        let msg = GatewayMsg::RemoteUpdate(update);
+        for peer in &self.remote_peers {
+            if let Err(err) = peer.send(GATEWAY_PATH, &msg) {
+                eprintln!(
+                    "cannot queue gateway update for district {}: {err}",
+                    peer.district
+                );
             }
         }
     }
@@ -122,6 +259,8 @@ mod tests {
         let mut gateway = Gateway::create_args(GatewayArgs {
             tx,
             metrics: Arc::new(Metrics::default()),
+            #[cfg(feature = "remoting")]
+            district: None,
         });
         let old = Arc::new(DistrictSnapshot {
             district: 4,

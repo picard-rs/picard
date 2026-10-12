@@ -12,6 +12,8 @@ fn cli(arguments: &[&str], environment: &[(&str, &str)]) -> Output {
         "LIVING_CITY_LOADTEST_SECS",
         "PICARD_CONSOLE_LISTEN",
         "PICARD_CONSOLE_TOKEN",
+        "LIVING_CITY_REMOTE_TOKEN",
+        "LIVING_CITY_REMOTE_LISTEN",
     ] {
         command.env_remove(variable);
     }
@@ -37,6 +39,8 @@ fn help_documents_clap_arguments_and_feature_gate() {
         assert!(help.contains(name), "{help}");
     }
     assert_eq!(help.contains("--console-listen"), cfg!(feature = "console"));
+    assert_eq!(help.contains("--district"), cfg!(feature = "remoting"));
+    assert_eq!(help.contains("--connect"), cfg!(feature = "remoting"));
     let output = cli(&["loadtest", "--help"], &[]);
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();

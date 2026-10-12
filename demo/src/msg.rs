@@ -214,10 +214,44 @@ pub enum SupervisorMsg {
 pub enum GatewayMsg {
     Flush,
     Snapshot(Arc<DistrictSnapshot>),
-    DistrictStarted { district: usize, generation: u64 },
+    DistrictStarted {
+        district: usize,
+        generation: u64,
+    },
     DistrictGone(usize),
-    InspectReply { id: String, json: String },
-    Status { paused: bool, target: usize },
+    InspectReply {
+        id: String,
+        json: String,
+    },
+    Status {
+        paused: bool,
+        target: usize,
+    },
+    #[cfg(feature = "remoting")]
+    RemoteUpdate(RemoteUpdate),
+    #[cfg(feature = "remoting")]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    SetRemotePeers(Vec<crate::remoting::PeerLink>),
+}
+
+#[cfg(feature = "remoting")]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub enum RemoteUpdate {
+    Snapshot(Arc<DistrictSnapshot>),
+    DistrictStarted {
+        district: usize,
+        generation: u64,
+    },
+    DistrictGone(usize),
+    InspectReply {
+        id: String,
+        json: String,
+    },
+    Status {
+        district: usize,
+        paused: bool,
+        target: usize,
+    },
 }
 
 /// Vehicle driving states as shown in the UI.
