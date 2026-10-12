@@ -633,3 +633,41 @@ fn routes_requests_through_application_owned_transport() {
     assert!(!is_valid_token(&format!("{TOKEN} ")));
     futures::executor::block_on(system.shutdown()).unwrap();
 }
+
+#[test]
+fn send_can_target_a_registered_remote_peer() {
+    let mut fixture = Fixture::new();
+    let (tx, rx) = mpsc::channel();
+    fixture.system.register_console_peer(
+        "district-1",
+        std::sync::Arc::new(move |path, message| {
+            if path == "/user/refused" {
+                return Err("peer refused".into());
+            }
+            tx.send((path.to_owned(), message)).unwrap();
+            Ok(())
+        }),
+    );
+
+    let peers = fixture.request(json!({ "op": "peers" })).result.unwrap();
+    assert_eq!(peers["peers"], json!(["district-1"]));
+
+    let response = fixture.request(json!({
+        "op": "send", "peer": "district-1", "path": "/user/gateway", "message": { "Ping": 1 }
+    }));
+    assert!(response.error.is_none(), "{:?}", response.error);
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+        ("/user/gateway".to_owned(), json!({ "Ping": 1 }))
+    );
+
+    for (peer, path, code) in [
+        ("missing", "/user/gateway", "not_found"),
+        ("district-1", "/user/refused", "remote_send"),
+        ("district-1", "relative", "invalid_request"),
+    ] {
+        let response =
+            fixture.request(json!({ "op": "send", "peer": peer, "path": path, "message": 1 }));
+        assert_eq!(response.error.unwrap().code, code);
+    }
+}

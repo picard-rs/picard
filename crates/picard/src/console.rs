@@ -72,10 +72,16 @@ pub enum Command {
     Restart {
         path: String,
     },
+    /// Send a JSON message to a local actor, or to an actor of the named remote `peer`
+    /// registered with [`ActorSystem::register_console_peer`].
     Send {
         path: String,
         message: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        peer: Option<String>,
     },
+    /// List the remote peers that [`Command::Send`] can target.
+    Peers,
 }
 
 fn default_page_limit() -> usize {
@@ -159,7 +165,19 @@ impl Console {
     }
 }
 
+/// Delivers a JSON message to the actor at the given path on a remote system.
+///
+/// Returns once the message is accepted for delivery; the error text is shown to the console
+/// user, so it must not contain secrets.
+pub type ConsolePeerSender = Arc<dyn Fn(&str, Value) -> Result<(), String> + Send + Sync>;
+
 impl ActorSystem {
+    /// Make a remote system reachable from the console: `send` requests naming `name` as
+    /// their `peer` are passed to `sender`. Replaces an earlier peer of the same name.
+    pub fn register_console_peer(&self, name: impl Into<String>, sender: ConsolePeerSender) {
+        self.provider.console().register_peer(name.into(), sender);
+    }
+
     /// A console service for routing requests over an application-owned transport.
     pub fn console(&self) -> Console {
         Console {
@@ -218,9 +236,24 @@ pub fn is_valid_token(token: &str) -> bool {
 #[derive(Default)]
 pub(crate) struct Registry {
     actors: DashMap<String, Arc<dyn ConsoleActor>>,
+    peers: DashMap<String, ConsolePeerSender>,
 }
 
 impl Registry {
+    pub(crate) fn register_peer(&self, name: String, sender: ConsolePeerSender) {
+        self.peers.insert(name, sender);
+    }
+
+    fn send_to_peer(&self, peer: &str, path: &str, message: Value) -> Result<Value, ConsoleError> {
+        let sender = self
+            .peers
+            .get(peer)
+            .map(|entry| Arc::clone(entry.value()))
+            .ok_or_else(|| ConsoleError::new("not_found", format!("No remote peer {peer}")))?;
+        sender(path, message).map_err(|err| ConsoleError::new("remote_send", err))?;
+        Ok(json!({ "queued": true, "peer": peer, "path": path }))
+    }
+
     pub(crate) fn register<Msg: LocalMessage>(&self, actor: ActorRef<Msg>, mailbox: Mailbox<Msg>) {
         self.actors.insert(
             actor.path().to_string(),
@@ -266,6 +299,25 @@ impl Registry {
 
     pub(crate) fn execute(&self, command: Command) -> Result<Value, ConsoleError> {
         let path = match &command {
+            Command::Peers => {
+                let mut peers: Vec<String> =
+                    self.peers.iter().map(|entry| entry.key().clone()).collect();
+                peers.sort();
+                return Ok(json!({ "peers": peers }));
+            }
+            Command::Send {
+                path,
+                message,
+                peer: Some(peer),
+            } => {
+                if !path.starts_with('/') {
+                    return Err(ConsoleError::new(
+                        "invalid_request",
+                        "Actor path must be absolute",
+                    ));
+                }
+                return self.send_to_peer(peer, path, message.clone());
+            }
             Command::Actors { offset, limit } => {
                 if !(1..=100).contains(limit) {
                     return Err(ConsoleError::new(
@@ -313,7 +365,7 @@ impl Registry {
             Command::Stop { .. } => actor.lifecycle(SystemCmd::Stop),
             Command::Restart { .. } => actor.lifecycle(SystemCmd::Restart),
             Command::Send { message, .. } => actor.send(message),
-            Command::Actors { .. } => unreachable!(),
+            Command::Actors { .. } | Command::Peers => unreachable!(),
         }
     }
 }

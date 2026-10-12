@@ -3,8 +3,8 @@
 use picard::console::Command;
 
 pub(crate) const COMMANDS: &[&str] = &[
-    "actors", "inspect", "messages", "pause", "resume", "clear", "stop", "restart", "send", "help",
-    "quit",
+    "actors", "inspect", "messages", "pause", "resume", "clear", "stop", "restart", "send",
+    "peers", "help", "quit",
 ];
 pub(crate) const HELP: &str = "\
 actors                  List actors and mailbox state
@@ -15,7 +15,8 @@ resume PATH             Resume user-message processing
 clear PATH              Discard queued user messages (requires pause)
 stop PATH               Request actor termination
 restart PATH            Request actor restart
-send PATH JSON          Send a typed JSON message (server requires serde)
+send [@PEER] PATH JSON  Send a typed JSON message (server requires serde)
+peers                   List remote peers that send can target with @PEER
 help                    Show this help
 quit                    Disconnect";
 
@@ -62,19 +63,30 @@ pub(crate) fn parse(line: &str) -> Result<Input, String> {
         .split_once(char::is_whitespace)
         .map_or((line, ""), |(name, rest)| (name, rest.trim()));
     if name == "send" {
-        let (path, json) = rest
-            .split_once(char::is_whitespace)
-            .ok_or("Usage: send PATH JSON")?;
+        const USAGE: &str = "Usage: send [@PEER] PATH JSON";
+        let (peer, rest) = match rest.strip_prefix('@') {
+            Some(after) => {
+                let (peer, rest) = after.split_once(char::is_whitespace).ok_or(USAGE)?;
+                (Some(peer.to_owned()), rest.trim_start())
+            }
+            None => (None, rest),
+        };
+        let (path, json) = rest.split_once(char::is_whitespace).ok_or(USAGE)?;
         let path = validate_path(path)?;
         let message =
             serde_json::from_str(json.trim()).map_err(|err| format!("Invalid JSON: {err}"))?;
-        return Ok(Input::Command(Command::Send { path, message }));
+        return Ok(Input::Command(Command::Send {
+            path,
+            message,
+            peer,
+        }));
     }
     let command = match name {
         "actors" if rest.is_empty() => Command::Actors {
             offset: 0,
             limit: 100,
         },
+        "peers" if rest.is_empty() => Command::Peers,
         "help" if rest.is_empty() => return Ok(Input::Help),
         "quit" if rest.is_empty() => return Ok(Input::Quit),
         "inspect" => Command::Inspect {
@@ -120,13 +132,36 @@ mod tests {
 
     #[test]
     fn parses_json_with_spaces_without_changing_it() {
-        let Input::Command(Command::Send { path, message }) =
-            parse(r#"send /user/worker {"Greet": {"name": "Jean Luc"}}"#).unwrap()
+        let Input::Command(Command::Send {
+            path,
+            message,
+            peer,
+        }) = parse(r#"send /user/worker {"Greet": {"name": "Jean Luc"}}"#).unwrap()
         else {
             panic!("Expected send")
         };
-        assert_eq!(path, "/user/worker");
+        assert_eq!((path.as_str(), peer), ("/user/worker", None));
         assert_eq!(message["Greet"]["name"], "Jean Luc");
+    }
+
+    #[test]
+    fn parses_a_remote_peer_target() {
+        let Input::Command(Command::Send {
+            path,
+            message,
+            peer,
+        }) = parse(r#"send @district-1 /user/gateway {"a": 1}"#).unwrap()
+        else {
+            panic!("Expected send")
+        };
+        assert_eq!(peer.as_deref(), Some("district-1"));
+        assert_eq!(path, "/user/gateway");
+        assert_eq!(message["a"], 1);
+        assert!(parse("send @district-1 /user/gateway").is_err());
+        assert!(matches!(
+            parse("peers").unwrap(),
+            Input::Command(Command::Peers)
+        ));
     }
 
     #[test]

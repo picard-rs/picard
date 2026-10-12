@@ -1025,11 +1025,11 @@ mod tests {
     #[test]
     fn line_edit_edits_and_completes() {
         let mut edit = LineEdit::default();
-        for ch in "pä".chars() {
+        for ch in "paä".chars() {
             assert!(edit.edit(key(KeyCode::Char(ch))));
         }
         edit.edit(key(KeyCode::Backspace));
-        assert_eq!(edit.text, "p");
+        assert_eq!(edit.text, "pa");
         assert!(edit.complete(&[]).is_empty());
         assert_eq!(edit.text, "pause ");
         let mut command = LineEdit::with_text("re".to_owned());

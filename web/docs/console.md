@@ -142,6 +142,8 @@ clear /user/worker
 resume /user/worker
 restart /user/worker
 send /user/worker {"Greet":{"name":"Picard"}}
+peers
+send @district-1 /user/supervisor {"SetVehicles":100}
 stop /user/worker
 help
 quit
@@ -226,6 +228,17 @@ locks are not compiled. Enabling it adds per-message inspection overhead and
 bounded history storage even before an endpoint is started. JSON serialization
 adds further overhead when both `console` and `serde` are enabled.
 
+## Sending to remote actors
+
+`send @PEER PATH JSON` forwards the JSON message to the actor at `PATH` on a remote
+system; `peers` lists the available `@PEER` names. The console only reaches peers the
+application registers with `ActorSystem::register_console_peer(name, sender)`, where
+`sender` hands the message to your remoting layer (for example a `RemoteConnection`).
+The remote actor must be registered for remote delivery, and the response only says
+the message was queued, not that the actor accepted it. In the wire protocol this is
+`{"op":"send","peer":"district-1","path":"/user/gateway","message":{...}}` and
+`{"op":"peers"}`. The Living City demo registers every `--connect` peer as `district-N`.
+
 ## Typed JSON sends
 
 `send` looks up the target actor's registered decoder and deserializes the JSON
@@ -276,8 +289,8 @@ Every request has an unsigned integer `id` and an `op`:
 ```
 
 Supported operations are `actors`, `inspect`, `messages`, `pause`, `resume`,
-`clear`, `stop`, `restart`, and `send`. All except `actors` require `path`;
-`send` additionally requires `message`.
+`clear`, `stop`, `restart`, `send`, and `peers`. All except `actors` and `peers`
+require `path`; `send` additionally requires `message` and accepts an optional `peer`.
 
 `actors` defaults to `offset: 0` and `limit: 100`. Limits must be in `1..=100`.
 Its result contains `actors`, `total`, and `next_offset` (null for the final
