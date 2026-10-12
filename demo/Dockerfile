@@ -1,4 +1,4 @@
-FROM rust:1.88-bookworm AS builder
+FROM rust:1-bookworm AS builder
 WORKDIR /workspace
 COPY . .
 RUN cargo build --release -p living-city --features remoting
