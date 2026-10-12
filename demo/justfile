@@ -1,6 +1,6 @@
 # Living City demo helpers. Run `just` from the demo/ directory.
 
-set dotenv-load := false
+set dotenv-load := true
 
 default:
     @just --list
@@ -22,10 +22,10 @@ token:
         echo "created demo/.env"
     fi
 
-# Build and start one container per district; UI on http://127.0.0.1:8080
+# Build and start one container per district; UI on http://127.0.0.1:8080 (override with LIVING_CITY_PORT)
 up: token
     docker compose up --build -d
-    @echo "Living City: http://127.0.0.1:8080"
+    @echo "Living City: http://127.0.0.1:${LIVING_CITY_PORT:-8080}"
 
 # Stop and remove the containers
 down: token
