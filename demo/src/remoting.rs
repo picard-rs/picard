@@ -18,6 +18,9 @@ pub const GATEWAY_PATH: &str = "/user/gateway";
 pub const SUPERVISOR_PATH: &str = "/user/supervisor";
 const IDENTITY_PATH: &str = "/_living_city/identity";
 
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(60);
+const REDISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerSpec {
     pub district: usize,
@@ -135,7 +138,7 @@ pub fn start(
                 Value::Null,
             )
         };
-        let identity = discover_identity(request)?;
+        let identity = discover_identity(request, DISCOVERY_TIMEOUT)?;
         let (outgoing, receive) = mpsc::channel::<(String, Value)>();
         let worker_connection = connection.clone();
         let peer_district = spec.district;
@@ -143,12 +146,35 @@ pub fn start(
         thread::Builder::new()
             .name(format!("living-city-remote-{peer_district}"))
             .spawn(move || {
+                let mut identity = identity;
                 while let Ok((path, payload)) = receive.recv() {
-                    let address = ActorAddress::remote(identity, endpoint.clone(), path);
-                    if let Err(err) =
-                        futures::executor::block_on(worker_connection.send(address, None, payload))
-                    {
-                        eprintln!("remote district {peer_district} send failed: {err}");
+                    let send = |identity: Uuid| {
+                        let address = ActorAddress::remote(identity, endpoint.clone(), &path);
+                        futures::executor::block_on(worker_connection.send(
+                            address,
+                            None,
+                            payload.clone(),
+                        ))
+                    };
+                    if send(identity).is_ok() {
+                        continue;
+                    }
+                    // A restarted peer has a new system ID; look it up again and retry once.
+                    let lookup = || {
+                        worker_connection.send(
+                            ActorAddress::local(Uuid::nil(), IDENTITY_PATH),
+                            None,
+                            Value::Null,
+                        )
+                    };
+                    match discover_identity(lookup, REDISCOVERY_TIMEOUT) {
+                        Ok(new_identity) => {
+                            identity = new_identity;
+                            if let Err(err) = send(identity) {
+                                eprintln!("remote district {peer_district} send failed: {err}");
+                            }
+                        }
+                        Err(err) => eprintln!("remote district {peer_district}: {err}"),
                     }
                 }
             })
@@ -166,8 +192,9 @@ pub fn start(
 
 fn discover_identity(
     mut send: impl FnMut() -> picard::remoting::RemoteFuture<RemoteResponse>,
+    timeout: Duration,
 ) -> Result<Uuid, String> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let deadline = std::time::Instant::now() + timeout;
     let mut last_error = None;
     while std::time::Instant::now() < deadline {
         match futures::executor::block_on(send()) {
