@@ -13,3 +13,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Vehicles in the distributed `living-city` mode migrate between districts running in different
   processes.
 - The `picard-console` TUI shows the actor tree collapsed; Right/Left expand and collapse children.
+- The console can `send @peer PATH JSON` to actors on registered remote peers (`peers` lists them).

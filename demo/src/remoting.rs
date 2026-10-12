@@ -179,15 +179,28 @@ pub fn start(
                 }
             })
             .map_err(|err| format!("cannot start remote sender: {err}"))?;
-        links.push(PeerLink {
+        let link = PeerLink {
             district: peer_district,
             system_id: identity,
             endpoint: spec.endpoint.clone(),
             outgoing,
-        });
+        };
+        #[cfg(feature = "console")]
+        register_console_peer(system, &link);
+        links.push(link);
     }
 
     Ok((listener, links))
+}
+
+/// Lets the console `send @district-N PATH JSON` to the peer's actors.
+#[cfg(feature = "console")]
+fn register_console_peer(system: &ActorSystem, link: &PeerLink) {
+    let link = link.clone();
+    system.register_console_peer(
+        format!("district-{}", link.district),
+        Arc::new(move |path, message| link.send(path, &message)),
+    );
 }
 
 fn discover_identity(
