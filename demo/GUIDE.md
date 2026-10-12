@@ -55,7 +55,11 @@ owns and simulates its local junctions and vehicles; direct vehicle crossing
 between remote district actors and transparent remote `ActorRef`s are not yet
 implemented.
 
-Build and run the nine-container example from the repository root:
+With [just](https://just.systems), run these from `demo/`: `just up` creates a
+git-ignored `.env` with a random shared token (if missing) and starts the
+nine containers; `just down`, `just restart`, `just logs [service]` and
+`just ps` manage them. `just run` and `just loadtest` start the single-process
+demo. Without `just`, build and run the nine-container example manually:
 
 ```sh
 export LIVING_CITY_REMOTE_TOKEN="$(openssl rand -hex 32)"

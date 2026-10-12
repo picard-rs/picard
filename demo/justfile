@@ -1,0 +1,43 @@
+# Living City demo helpers. Run `just` from the demo/ directory.
+
+set dotenv-load := false
+
+default:
+    @just --list
+
+# Run the single-process demo on http://127.0.0.1:8080
+run *args:
+    cargo run -p living-city --release -- {{ args }}
+
+# Run the headless load test
+loadtest *args:
+    cargo run -p living-city --release -- loadtest {{ args }}
+
+# Create demo/.env with a random shared token for the distributed setup (kept if it exists)
+token:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f .env ] || ! grep -q '^LIVING_CITY_REMOTE_TOKEN=' .env; then
+        echo "LIVING_CITY_REMOTE_TOKEN=$(openssl rand -hex 32)" >> .env
+        echo "created demo/.env"
+    fi
+
+# Build and start one container per district; UI on http://127.0.0.1:8080
+up: token
+    docker compose up --build -d
+    @echo "Living City: http://127.0.0.1:8080"
+
+# Stop and remove the containers
+down: token
+    docker compose down
+
+# Rebuild and restart everything
+restart: down up
+
+# Follow the logs (optionally of one service, e.g. `just logs district-3`)
+logs *services: token
+    docker compose logs -f {{ services }}
+
+# Show container status
+ps: token
+    docker compose ps
