@@ -1,14 +1,9 @@
-use std::{
-    net::SocketAddr,
-    sync::{Arc, mpsc},
-    thread,
-    time::Duration,
-};
+use std::{net::SocketAddr, sync::Arc, thread, time::Duration};
 
 use picard::actors::ActorSystem;
 use picard::remoting::{
     ActorAddress, PeerAuthenticator, RemoteHandler, RemoteListener, RemotePeer, RemoteRequest,
-    RemoteResponse, RemoteTransport, WebSocketTransport,
+    RemoteResponse,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -21,7 +16,6 @@ const IDENTITY_PATH: &str = "/_living_city/identity";
 const CONSOLE_PATH: &str = "/_living_city/console";
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(60);
-const REDISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerSpec {
@@ -53,9 +47,10 @@ impl std::str::FromStr for PeerSpec {
 #[derive(Clone)]
 pub struct PeerLink {
     pub district: usize,
-    system_id: Uuid,
-    endpoint: String,
-    outgoing: mpsc::Sender<(String, Value)>,
+    pub system_id: Uuid,
+    pub endpoint: String,
+    pub connection: picard::remoting::RemoteConnection,
+    outgoing: std::sync::mpsc::Sender<(String, Value)>,
 }
 
 impl std::fmt::Debug for PeerLink {
@@ -108,7 +103,7 @@ pub fn start(
             .map(|peer| (format!("district-{}", peer.district), token.clone())),
     );
     let handler = request_handler(system);
-    let transport: Arc<dyn RemoteTransport> = Arc::new(WebSocketTransport);
+    let transport = Arc::new(picard::remoting::ClusterTransport::new());
     let listener = system
         .listen_remote_with(bind, authenticator, handler, transport.clone())
         .map_err(|err| format!("cannot start remoting listener: {err}"))?;
@@ -130,7 +125,7 @@ pub fn start(
             )
         };
         let identity = discover_identity(request, DISCOVERY_TIMEOUT)?;
-        let (outgoing, receive) = mpsc::channel::<(String, Value)>();
+        let (outgoing, receive) = std::sync::mpsc::channel::<(String, Value)>();
         let worker_connection = connection.clone();
         let peer_district = spec.district;
         let endpoint = spec.endpoint.clone();
@@ -141,11 +136,8 @@ pub fn start(
                 while let Ok((path, payload)) = receive.recv() {
                     let send = |identity: Uuid| {
                         let address = ActorAddress::remote(identity, endpoint.clone(), &path);
-                        futures::executor::block_on(worker_connection.send(
-                            address,
-                            None,
-                            payload.clone(),
-                        ))
+                        let fut = worker_connection.send(address, None, payload.clone());
+                        picard::remoting::block_on(fut)
                     };
                     if send(identity).is_ok() {
                         continue;
@@ -158,7 +150,7 @@ pub fn start(
                             Value::Null,
                         )
                     };
-                    match discover_identity(lookup, REDISCOVERY_TIMEOUT) {
+                    match discover_identity(lookup, Duration::from_secs(5)) {
                         Ok(new_identity) => {
                             identity = new_identity;
                             if let Err(err) = send(identity) {
@@ -170,14 +162,18 @@ pub fn start(
                 }
             })
             .map_err(|err| format!("cannot start remote sender: {err}"))?;
+        #[cfg(feature = "console")]
+        system.register_console_remote_peer(
+            format!("district-{}", spec.district),
+            connection.clone(),
+        );
         let link = PeerLink {
-            district: peer_district,
+            district: spec.district,
             system_id: identity,
             endpoint: spec.endpoint.clone(),
+            connection,
             outgoing,
         };
-        #[cfg(feature = "console")]
-        register_console_peer(system, &link, &connection);
         links.push(link);
     }
 
@@ -223,43 +219,6 @@ fn console_reply(console: &picard::console::Console, request: &RemoteRequest) ->
         );
     }
     RemoteResponse::replied(request.id, Value::String(console.handle_text(text)))
-}
-
-/// Lets the console reach the peer: `send @district-N PATH JSON` delivers to its actors and
-/// `@district-N COMMAND` runs a console command on it.
-#[cfg(feature = "console")]
-fn register_console_peer(
-    system: &ActorSystem,
-    link: &PeerLink,
-    connection: &picard::remoting::RemoteConnection,
-) {
-    let name = format!("district-{}", link.district);
-    let sender = link.clone();
-    system.register_console_peer(
-        name.clone(),
-        Arc::new(move |path, message| sender.send(path, &message)),
-    );
-    let connection = connection.clone();
-    system.register_console_peer_query(
-        name,
-        Arc::new(move |request| {
-            let response = futures::executor::block_on(connection.send(
-                ActorAddress::local(Uuid::nil(), CONSOLE_PATH),
-                None,
-                Value::String(request.to_owned()),
-            ))
-            .map_err(|err| err.to_string())?;
-            if !response.accepted {
-                return Err(response
-                    .error
-                    .map_or_else(|| "request rejected".into(), |err| err.to_string()));
-            }
-            match response.payload {
-                Some(Value::String(text)) => Ok(text),
-                _ => Err("invalid reply from peer".into()),
-            }
-        }),
-    );
 }
 
 fn discover_identity(

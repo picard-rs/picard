@@ -721,3 +721,89 @@ fn forward_runs_commands_on_a_registered_peer_console() {
     assert_eq!(missing.error.unwrap().code, "not_found");
     futures::executor::block_on(remote.shutdown()).unwrap();
 }
+
+#[test]
+fn send_to_peer_with_query_returns_actual_peer_response() {
+    let mut fixture = Fixture::new();
+    let remote = ActorSystem::new().unwrap();
+    let (tx, events) = mpsc::channel();
+    let _actor = remote
+        .actor_of_args::<Recorder, _>("remote-worker", tx)
+        .unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        Event::Started
+    );
+    let remote_console = remote.console();
+    fixture.system.register_console_peer_query(
+        "remote-node",
+        std::sync::Arc::new(move |request| {
+            assert!(!request.contains("forward"), "{request}");
+            Ok(remote_console.handle_text(request))
+        }),
+    );
+
+    // Send to valid remote actor returns accepted from the peer!
+    let response = fixture.request(json!({
+        "op": "send",
+        "peer": "remote-node",
+        "path": "/user/remote-worker",
+        "message": { "Count": 99 }
+    }));
+    #[cfg(feature = "serde")]
+    {
+        assert!(response.error.is_none(), "{:?}", response.error);
+        let res = response.result.unwrap();
+        assert_eq!(res["accepted"], true);
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Received(Msg::Count(99))
+        );
+    }
+    #[cfg(not(feature = "serde"))]
+    {
+        assert_eq!(response.error.unwrap().code, "json_unavailable");
+    }
+
+    // Send to nonexistent actor returns error from the peer!
+    let response = fixture.request(json!({
+        "op": "send",
+        "peer": "remote-node",
+        "path": "/user/nonexistent",
+        "message": { "Count": 1 }
+    }));
+    assert!(response.result.is_none());
+    assert_eq!(response.error.unwrap().code, "not_found");
+
+    futures::executor::block_on(remote.shutdown()).unwrap();
+}
+
+#[test]
+fn console_peer_client_connects_and_queries() {
+    let fixture = Fixture::new();
+    let address = fixture.handle.as_ref().unwrap().local_addr();
+    let endpoint = format!("ws://{address}/console");
+    let client = picard::console::ConsolePeerClient::new(&endpoint, TOKEN);
+
+    let reply = client
+        .query(r#"{"id":1,"op":"inspect","path":"/user/worker"}"#)
+        .expect("query response");
+    let resp: Response = serde_json::from_str(&reply).unwrap();
+    assert_eq!(resp.id, Some(1));
+    assert_eq!(resp.result.unwrap()["path"], "/user/worker");
+
+    let client_sys = ActorSystem::new().unwrap();
+    client_sys.connect_console_peer("peer-ws", &endpoint, TOKEN);
+    let console = client_sys.console();
+    let reply = console.handle_text(
+        r#"{"id":2,"op":"send","peer":"peer-ws","path":"/user/worker","message":{"Count":123}}"#,
+    );
+    let resp: Response = serde_json::from_str(&reply).unwrap();
+    assert_eq!(resp.id, Some(2));
+    #[cfg(feature = "serde")]
+    assert_eq!(resp.result.unwrap()["accepted"], true);
+    #[cfg(not(feature = "serde"))]
+    assert_eq!(resp.error.unwrap().code, "json_unavailable");
+
+    futures::executor::block_on(client_sys.shutdown()).unwrap();
+}

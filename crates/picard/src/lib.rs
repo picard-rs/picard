@@ -195,6 +195,23 @@ impl AnyMessage {
             .map(|msg| *msg)
             .map_err(|_| DowncastAnyMessageError)
     }
+
+    /// Access the wrapped message as `&dyn Any`.
+    #[must_use]
+    pub fn as_any(&self) -> Option<&(dyn Any + Send)> {
+        self.msg.as_deref()
+    }
+
+    /// Take or clone the wrapped type-erased message.
+    pub fn take_any(&mut self) -> Option<Box<dyn Any + Send>> {
+        if let Some(clone_message) = self.clone_message {
+            self.msg
+                .as_ref()
+                .map(|stored| clone_message(stored.as_ref()))
+        } else {
+            self.msg.take()
+        }
+    }
 }
 
 impl Debug for AnyMessage {

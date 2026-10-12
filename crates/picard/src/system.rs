@@ -511,6 +511,54 @@ impl ActorSystem {
         let system = self.clone();
         std::sync::Arc::new(move |_, request| {
             let id = request.id;
+            if request.destination.path == "/_picard/identity" {
+                return crate::remoting::RemoteResponse::replied(
+                    id,
+                    serde_json::json!({ "system_id": system.id() }),
+                );
+            }
+            if request.destination.path == "/_picard/migrate" {
+                let payload = match serde_json::from_value::<crate::remoting::MigrationPayload>(
+                    request.payload,
+                ) {
+                    Ok(payload) => payload,
+                    Err(err) => {
+                        return crate::remoting::RemoteResponse::rejected(
+                            id,
+                            crate::remoting::RemoteError::InvalidMessage(err.to_string()),
+                        );
+                    }
+                };
+                return match provider.handle_migration(&system, &payload) {
+                    Ok(()) => crate::remoting::RemoteResponse::replied(
+                        id,
+                        serde_json::json!({ "migrated": true, "path": payload.destination_path }),
+                    ),
+                    Err(err) => crate::remoting::RemoteResponse::rejected(
+                        id,
+                        crate::remoting::RemoteError::Rejected(err),
+                    ),
+                };
+            }
+            #[cfg(feature = "console")]
+            if request.destination.path == "/_picard/console" {
+                let text = request.payload.as_str().unwrap_or_default();
+                if let Ok(parsed) = serde_json::from_str::<crate::console::Request>(text)
+                    && matches!(parsed.command, crate::console::Command::Forward { .. })
+                {
+                    return crate::remoting::RemoteResponse::rejected(
+                        id,
+                        crate::remoting::RemoteError::Rejected(
+                            "console forwarding is not chained".into(),
+                        ),
+                    );
+                }
+                let reply_json = system.console().handle_text(text);
+                return crate::remoting::RemoteResponse::replied(
+                    id,
+                    serde_json::Value::String(reply_json),
+                );
+            }
             let result = provider.dispatch_remote(&system, &request);
             match result {
                 Ok(Some(payload)) => crate::remoting::RemoteResponse::replied(id, payload),
@@ -531,6 +579,111 @@ impl ActorSystem {
         transport: std::sync::Arc<dyn crate::remoting::RemoteTransport>,
     ) -> Result<Box<dyn crate::remoting::RemoteListener>, crate::remoting::RemoteError> {
         transport.listen(bind, authenticator, handler)
+    }
+
+    /// Register a handler to reconstruct migrated actors of `type_name`.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    pub fn register_migration_handler(
+        &self,
+        type_name: impl Into<String>,
+        handler: crate::remoting::MigrationHandler,
+    ) {
+        self.provider
+            .register_migration_handler(type_name.into(), handler);
+    }
+
+    /// Migrate a live actor at `path` to a remote system reachable via `connection`.
+    ///
+    /// Drains in-flight messages from the local actor's mailbox, transfers state
+    /// and queued messages to the remote system, and installs a forwarder so the
+    /// local address remains valid and transparently forwards future messages.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn migrate_actor(
+        &self,
+        path: &str,
+        target_system_id: uuid::Uuid,
+        target_endpoint: Option<String>,
+        target_path: Option<&str>,
+        type_name: &str,
+        state: serde_json::Value,
+        connection: &crate::remoting::RemoteConnection,
+    ) -> Result<(), crate::remoting::RemoteError> {
+        let actor_path = crate::actor::ActorPath::new(path);
+        if !self.provider.has_actor(&actor_path) {
+            return Err(crate::remoting::RemoteError::ActorNotFound(
+                path.to_string(),
+            ));
+        }
+
+        let in_flight = self.provider.drain_mailbox(&actor_path);
+
+        let target_id = if target_system_id.is_nil() {
+            let id_dest =
+                crate::remoting::ActorAddress::local(uuid::Uuid::nil(), "/_picard/identity");
+            let fut = connection.send(id_dest, None, serde_json::Value::Null);
+            let resp = crate::remoting::block_on(fut)?;
+            resp.payload
+                .as_ref()
+                .and_then(|v| v.get("system_id"))
+                .and_then(serde_json::Value::as_str)
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .unwrap_or(uuid::Uuid::nil())
+        } else {
+            target_system_id
+        };
+
+        let dest_path = target_path.unwrap_or(path).to_string();
+
+        let payload = crate::remoting::MigrationPayload {
+            type_name: type_name.to_string(),
+            path: path.to_string(),
+            destination_path: dest_path.clone(),
+            origin_system_id: self.id(),
+            origin_endpoint: None,
+            state,
+            in_flight,
+        };
+
+        let migrate_dest = crate::remoting::ActorAddress::local(target_id, "/_picard/migrate");
+        let payload_val = serde_json::to_value(&payload)
+            .map_err(|e| crate::remoting::RemoteError::InvalidMessage(e.to_string()))?;
+        let fut = connection.send(migrate_dest, None, payload_val);
+        let resp = crate::remoting::block_on(fut)?;
+        if !resp.accepted {
+            return Err(resp.error.unwrap_or_else(|| {
+                crate::remoting::RemoteError::Rejected("migration rejected by peer".into())
+            }));
+        }
+
+        let fwd_conn = connection.clone();
+        let fwd_endpoint = target_endpoint.clone();
+        let fwd_path = dest_path.clone();
+        let forward_fn = std::sync::Arc::new(move |payload: serde_json::Value| {
+            let address = crate::remoting::ActorAddress {
+                system_id: target_id,
+                endpoint: fwd_endpoint.clone(),
+                path: fwd_path.clone(),
+            };
+            let fut = fwd_conn.send(address, None, payload);
+            let _ = crate::remoting::block_on(fut);
+            Ok(())
+        });
+
+        self.provider.install_forwarder(
+            &actor_path,
+            forward_fn,
+            target_id,
+            target_endpoint,
+            dest_path,
+            connection.clone(),
+        );
+
+        if let Some(cell) = self.provider.get_cell(&actor_path) {
+            cell.stop_local_instance();
+        }
+
+        Ok(())
     }
 
     /// Returns the name of the system

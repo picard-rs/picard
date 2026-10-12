@@ -1,3 +1,12 @@
+#[cfg(feature = "remoting")]
+use std::any::Any;
+
+#[cfg(feature = "remoting")]
+pub(crate) type ForwarderFn =
+    Arc<dyn Fn(serde_json::Value) -> Result<(), AnyEnqueueError> + Send + Sync>;
+#[cfg(feature = "remoting")]
+pub(crate) type EncoderFn = Arc<dyn Fn(&dyn Any) -> Option<serde_json::Value> + Send + Sync>;
+
 use std::{
     collections::HashMap,
     fmt,
@@ -52,6 +61,10 @@ struct ActorCellInner {
     sys_mailbox: MailboxSender<SystemMsg>,
     #[cfg(feature = "remoting")]
     remote_reply: Option<Arc<std::sync::mpsc::SyncSender<serde_json::Value>>>,
+    #[cfg(feature = "remoting")]
+    forwarder: std::sync::RwLock<Option<ForwarderFn>>,
+    #[cfg(feature = "remoting")]
+    encoder: std::sync::RwLock<Option<EncoderFn>>,
 }
 
 impl ActorCell {
@@ -76,6 +89,10 @@ impl ActorCell {
                 sys_mailbox,
                 #[cfg(feature = "remoting")]
                 remote_reply: None,
+                #[cfg(feature = "remoting")]
+                forwarder: std::sync::RwLock::new(None),
+                #[cfg(feature = "remoting")]
+                encoder: std::sync::RwLock::new(None),
             }),
         }
     }
@@ -98,6 +115,8 @@ impl ActorCell {
                 mailbox: self.inner.mailbox.clone(),
                 sys_mailbox: self.inner.sys_mailbox.clone(),
                 remote_reply: Some(Arc::new(sender)),
+                forwarder: std::sync::RwLock::new(None),
+                encoder: std::sync::RwLock::new(None),
             }),
         }
     }
@@ -117,6 +136,38 @@ impl ActorCell {
     #[cfg(feature = "remoting")]
     pub(crate) fn is_remote_reply(&self) -> bool {
         self.inner.remote_reply.is_some()
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn set_forwarder(
+        &self,
+        forwarder: Arc<dyn Fn(serde_json::Value) -> Result<(), AnyEnqueueError> + Send + Sync>,
+    ) {
+        if let Ok(mut lock) = self.inner.forwarder.write() {
+            *lock = Some(forwarder);
+        }
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn get_forwarder(&self) -> Option<ForwarderFn> {
+        self.inner.forwarder.read().ok().and_then(|f| f.clone())
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn set_encoder(&self, encoder: EncoderFn) {
+        if let Ok(mut lock) = self.inner.encoder.write() {
+            *lock = Some(encoder);
+        }
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn get_encoder(&self) -> Option<EncoderFn> {
+        self.inner.encoder.read().ok().and_then(|e| e.clone())
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn stop_local_instance(&self) {
+        Self::stop(&self.myself());
     }
 
     pub(crate) fn init(self, kernel: &KernelRef) -> Self {
@@ -169,6 +220,15 @@ impl ActorCell {
         #[cfg(feature = "remoting")]
         if self.is_remote_reply() {
             return Err(AnyEnqueueError);
+        }
+        #[cfg(feature = "remoting")]
+        if let Some(forwarder) = self.get_forwarder()
+            && let Some(encoder) = self.get_encoder()
+            && let Some(boxed) = msg.take_any()
+            && let Some(payload) = encoder(boxed.as_ref())
+        {
+            let _ = forwarder(payload);
+            return Ok(());
         }
         let mb = &self.inner.mailbox;
         let k = self.kernel();
@@ -391,6 +451,10 @@ where
                 sys_mailbox,
                 #[cfg(feature = "remoting")]
                 remote_reply: None,
+                #[cfg(feature = "remoting")]
+                forwarder: std::sync::RwLock::new(None),
+                #[cfg(feature = "remoting")]
+                encoder: std::sync::RwLock::new(None),
             }),
         };
 
@@ -405,6 +469,16 @@ where
 
     pub fn myself(&self) -> ActorRef<Msg> {
         self.cell.myself().typed(self.clone())
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn to_actor_cell(&self) -> ActorCell {
+        self.cell.clone()
+    }
+
+    #[cfg(feature = "remoting")]
+    pub(crate) fn set_encoder(&self, encoder: EncoderFn) {
+        self.cell.set_encoder(encoder);
     }
 
     pub fn uri(&self) -> &ActorUri {
@@ -440,6 +514,14 @@ where
     }
 
     pub(crate) fn send_msg(&self, msg: Envelope<Msg>) -> MsgResult<Envelope<Msg>> {
+        #[cfg(feature = "remoting")]
+        if let Some(forwarder) = self.cell.get_forwarder()
+            && let Some(encoder) = self.cell.get_encoder()
+            && let Some(payload) = encoder(&msg.msg)
+        {
+            let _ = forwarder(payload);
+            return Ok(());
+        }
         let mb = &self.mailbox;
         let k = self.cell.kernel();
 

@@ -18,9 +18,10 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use subtle::ConstantTimeEq;
@@ -42,6 +43,30 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const PROTOCOL_VERSION: u16 = 3;
 /// Maximum time a remote ask may wait for an actor reply.
 pub const MAX_REMOTE_ASK_TIMEOUT_MS: u64 = 60_000;
+
+/// Synchronously blocks on a future without triggering thread-pool re-entrancy checks.
+pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+    struct ThreadWaker(std::thread::Thread);
+    impl Wake for ThreadWaker {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let mut future = std::pin::pin!(future);
+    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let mut cx = Context::from_waker(&waker);
+    loop {
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(result) => return result,
+            Poll::Pending => std::thread::park(),
+        }
+    }
+}
 
 /// Actor location carried over a remote connection.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -167,6 +192,30 @@ impl RemoteResponse {
         }
     }
 }
+
+/// Carries the state and pending messages of an actor being moved between systems.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MigrationPayload {
+    /// Identifier mapping to a registered migration handler on the destination.
+    pub type_name: String,
+    /// Original actor path on the source system.
+    pub path: String,
+    /// Destination actor path on the target system.
+    pub destination_path: String,
+    /// System ID of the source system.
+    pub origin_system_id: Uuid,
+    /// Optional endpoint of the source system.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_endpoint: Option<String>,
+    /// Serialized application state of the actor.
+    pub state: Value,
+    /// In-flight messages drained from the actor's mailbox at migration time.
+    pub in_flight: Vec<Value>,
+}
+
+/// Handler function invoked on the destination system to recreate a migrated actor.
+pub type MigrationHandler =
+    Arc<dyn Fn(&crate::system::ActorSystem, &MigrationPayload) -> Result<(), String> + Send + Sync>;
 
 /// Failures visible to a remoting caller.
 #[derive(Clone, Debug, Deserialize, Error, Serialize)]
@@ -546,10 +595,9 @@ impl Drop for WebSocketListener {
     }
 }
 
-fn websocket_send(
+fn connect_to_peer(
     peer: &RemotePeer,
-    request: &RemoteRequest,
-) -> Result<RemoteResponse, RemoteError> {
+) -> Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>, RemoteError> {
     let mut http_request = peer
         .endpoint
         .as_str()
@@ -568,8 +616,16 @@ fn websocket_send(
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_FRAME_BYTES))
         .max_frame_size(Some(MAX_FRAME_BYTES));
-    let (mut socket, _) = tungstenite::client::connect_with_config(http_request, Some(config), 0)
+    let (socket, _) = tungstenite::client::connect_with_config(http_request, Some(config), 0)
         .map_err(|err| RemoteError::Transport(err.to_string()))?;
+    Ok(socket)
+}
+
+fn websocket_send(
+    peer: &RemotePeer,
+    request: &RemoteRequest,
+) -> Result<RemoteResponse, RemoteError> {
+    let mut socket = connect_to_peer(peer)?;
     let frame = serde_json::to_string(request)
         .map_err(|err| RemoteError::InvalidMessage(err.to_string()))?;
     if frame.len() > MAX_FRAME_BYTES {
@@ -603,6 +659,380 @@ fn websocket_send(
             .unwrap_or_else(|| RemoteError::Rejected("unspecified rejection".into())));
     }
     Ok(response)
+}
+
+/// Configuration options for [`ClusterTransport`].
+#[derive(Clone, Debug)]
+pub struct ClusterTransportOptions {
+    /// Maximum number of messages queued for a single peer before backpressure is applied.
+    pub queue_capacity: usize,
+    /// Maximum time to wait to enqueue when the queue is full.
+    pub backpressure_timeout: Duration,
+    /// Maximum number of messages to batch in one transport flush.
+    pub max_batch_size: usize,
+    /// Maximum time to wait for a batch to fill.
+    pub batch_timeout: Duration,
+    /// Initial backoff delay between reconnection attempts.
+    pub reconnect_backoff: Duration,
+    /// Maximum backoff delay between reconnection attempts.
+    pub max_reconnect_backoff: Duration,
+    /// Request timeout when waiting for response from peer.
+    pub request_timeout: Duration,
+}
+
+impl Default for ClusterTransportOptions {
+    fn default() -> Self {
+        Self {
+            queue_capacity: 1024,
+            backpressure_timeout: Duration::from_millis(500),
+            max_batch_size: 64,
+            batch_timeout: Duration::from_millis(5),
+            reconnect_backoff: Duration::from_millis(100),
+            max_reconnect_backoff: Duration::from_secs(3),
+            request_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+struct ClusterWorkItem {
+    request: RemoteRequest,
+    reply_tx: Option<futures::channel::oneshot::Sender<Result<RemoteResponse, RemoteError>>>,
+    created_at: Instant,
+}
+
+struct ClusterPeerWorker {
+    tx: crossbeam_channel::Sender<ClusterWorkItem>,
+    stop: Arc<AtomicBool>,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl ClusterPeerWorker {
+    fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.lock().ok().and_then(|mut t| t.take()) {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Ready-made network transport with persistent connections, automatic reconnects,
+/// message batching, and bounded queue backpressure.
+pub struct ClusterTransport {
+    options: ClusterTransportOptions,
+    workers: DashMap<String, Arc<ClusterPeerWorker>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Default for ClusterTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClusterTransport {
+    /// Construct a new `ClusterTransport` with default options.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::with_options(ClusterTransportOptions::default())
+    }
+
+    /// Construct a new `ClusterTransport` with custom options.
+    #[must_use]
+    pub fn with_options(options: ClusterTransportOptions) -> Self {
+        Self {
+            options,
+            workers: DashMap::new(),
+            stop: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Read the configured options.
+    #[must_use]
+    pub fn options(&self) -> &ClusterTransportOptions {
+        &self.options
+    }
+
+    /// Close all active peer connections and stop background workers.
+    pub fn close(&self) {
+        self.stop.store(true, Ordering::Release);
+        for entry in &self.workers {
+            entry.value().stop();
+        }
+        self.workers.clear();
+    }
+
+    fn get_or_create_worker(
+        &self,
+        peer: &RemotePeer,
+    ) -> Result<Arc<ClusterPeerWorker>, RemoteError> {
+        if self.stop.load(Ordering::Acquire) {
+            return Err(RemoteError::Transport("cluster transport is closed".into()));
+        }
+        let key = format!("{}@{}", peer.id, peer.endpoint);
+        if let Some(entry) = self.workers.get(&key)
+            && !entry.stop.load(Ordering::Acquire)
+        {
+            return Ok(entry.clone());
+        }
+
+        let (tx, rx) = crossbeam_channel::bounded(self.options.queue_capacity);
+        let worker_stop = Arc::new(AtomicBool::new(false));
+        let worker_stop_thread = worker_stop.clone();
+        let peer_clone = peer.clone();
+        let options_clone = self.options.clone();
+
+        let thread = thread::Builder::new()
+            .name(format!("picard-cluster-peer-{}", peer.id))
+            .spawn(move || {
+                run_peer_worker(peer_clone, rx, worker_stop_thread, options_clone);
+            })
+            .map_err(|err| RemoteError::Transport(err.to_string()))?;
+
+        let worker = Arc::new(ClusterPeerWorker {
+            tx,
+            stop: worker_stop,
+            thread: Mutex::new(Some(thread)),
+        });
+
+        self.workers.insert(key, worker.clone());
+        Ok(worker)
+    }
+}
+
+impl Drop for ClusterTransport {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+impl RemoteTransport for ClusterTransport {
+    fn send(&self, peer: RemotePeer, request: RemoteRequest) -> RemoteFuture<RemoteResponse> {
+        let worker = match self.get_or_create_worker(&peer) {
+            Ok(w) => w,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
+
+        let (reply_tx, reply_rx) = futures::channel::oneshot::channel();
+        let item = ClusterWorkItem {
+            request,
+            reply_tx: Some(reply_tx),
+            created_at: Instant::now(),
+        };
+
+        match worker
+            .tx
+            .send_timeout(item, self.options.backpressure_timeout)
+        {
+            Ok(()) => Box::pin(async move {
+                reply_rx
+                    .await
+                    .map_err(|_| RemoteError::Transport("cluster peer worker closed".into()))?
+            }),
+            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => Box::pin(async move {
+                Err(RemoteError::Transport(
+                    "cluster transport backpressure: peer queue full".into(),
+                ))
+            }),
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => Box::pin(async move {
+                Err(RemoteError::Transport(
+                    "cluster peer worker disconnected".into(),
+                ))
+            }),
+        }
+    }
+
+    fn listen(
+        &self,
+        bind: SocketAddr,
+        authenticator: PeerAuthenticator,
+        handler: RemoteHandler,
+    ) -> Result<Box<dyn RemoteListener>, RemoteError> {
+        WebSocketTransport.listen(bind, authenticator, handler)
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_peer_worker(
+    peer: RemotePeer,
+    rx: crossbeam_channel::Receiver<ClusterWorkItem>,
+    stop: Arc<AtomicBool>,
+    options: ClusterTransportOptions,
+) {
+    let mut socket: Option<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>> =
+        None;
+    let mut backoff = options.reconnect_backoff;
+
+    while !stop.load(Ordering::Acquire) {
+        let first_item = match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(item) => item,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+        };
+
+        let mut batch = Vec::with_capacity(options.max_batch_size);
+        batch.push(first_item);
+        if options.max_batch_size > 1 {
+            let deadline = Instant::now() + options.batch_timeout;
+            while batch.len() < options.max_batch_size {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                match rx.recv_timeout(remaining) {
+                    Ok(item) => batch.push(item),
+                    Err(_) => break,
+                }
+            }
+        }
+
+        'batch_loop: loop {
+            if stop.load(Ordering::Acquire) {
+                for mut item in batch {
+                    if let Some(tx) = item.reply_tx.take() {
+                        let _ = tx.send(Err(RemoteError::Transport("peer worker stopped".into())));
+                    }
+                }
+                return;
+            }
+
+            if socket.is_none() {
+                match connect_to_peer(&peer) {
+                    Ok(mut s) => {
+                        if let tungstenite::stream::MaybeTlsStream::Plain(stream) = s.get_mut() {
+                            let _ = stream.set_nodelay(true);
+                            let _ = stream.set_read_timeout(Some(options.request_timeout));
+                            let _ = stream.set_write_timeout(Some(options.request_timeout));
+                        }
+                        socket = Some(s);
+                        backoff = options.reconnect_backoff;
+                    }
+                    Err(err) => {
+                        let now = Instant::now();
+                        if batch.iter().any(|item| {
+                            now.duration_since(item.created_at) > options.request_timeout
+                        }) {
+                            for mut item in batch {
+                                if let Some(tx) = item.reply_tx.take() {
+                                    let _ = tx.send(Err(RemoteError::Transport(format!(
+                                        "peer connection failed and request timed out: {err}"
+                                    ))));
+                                }
+                            }
+                            break 'batch_loop;
+                        }
+                        thread::sleep(backoff);
+                        backoff = (backoff * 2).min(options.max_reconnect_backoff);
+                        continue 'batch_loop;
+                    }
+                }
+            }
+
+            let Some(sock) = socket.as_mut() else {
+                continue 'batch_loop;
+            };
+
+            let mut failed = false;
+            let mut failed_index = 0;
+            for (i, item) in batch.iter_mut().enumerate() {
+                let frame = match serde_json::to_string(&item.request) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        if let Some(tx) = item.reply_tx.take() {
+                            let _ = tx.send(Err(RemoteError::InvalidMessage(err.to_string())));
+                        }
+                        continue;
+                    }
+                };
+                if frame.len() > MAX_FRAME_BYTES {
+                    if let Some(tx) = item.reply_tx.take() {
+                        let _ = tx.send(Err(RemoteError::FrameTooLarge));
+                    }
+                    continue;
+                }
+                if sock.send(Message::Text(frame.into())).is_err() {
+                    failed = true;
+                    failed_index = i;
+                    break;
+                }
+                match sock.read() {
+                    Ok(Message::Text(text)) => {
+                        match serde_json::from_str::<RemoteResponse>(&text) {
+                            Ok(response) => {
+                                if response.version != PROTOCOL_VERSION {
+                                    if let Some(tx) = item.reply_tx.take() {
+                                        let _ = tx.send(Err(RemoteError::UnsupportedVersion(
+                                            response.version,
+                                        )));
+                                    }
+                                } else if response.id != item.request.id {
+                                    if let Some(tx) = item.reply_tx.take() {
+                                        let _ = tx.send(Err(RemoteError::Transport(
+                                            "response correlation ID does not match request".into(),
+                                        )));
+                                    }
+                                } else if !response.accepted {
+                                    if let Some(tx) = item.reply_tx.take() {
+                                        let _ = tx.send(Err(response
+                                            .error
+                                            .clone()
+                                            .unwrap_or_else(|| {
+                                                RemoteError::Rejected(
+                                                    "unspecified rejection".into(),
+                                                )
+                                            })));
+                                    }
+                                } else if let Some(tx) = item.reply_tx.take() {
+                                    let _ = tx.send(Ok(response));
+                                }
+                            }
+                            Err(err) => {
+                                if let Some(tx) = item.reply_tx.take() {
+                                    let _ =
+                                        tx.send(Err(RemoteError::InvalidMessage(err.to_string())));
+                                }
+                            }
+                        }
+                    }
+                    Ok(Message::Close(_)) | Err(_) => {
+                        failed = true;
+                        failed_index = i;
+                        break;
+                    }
+                    _ => {
+                        if let Some(tx) = item.reply_tx.take() {
+                            let _ = tx.send(Err(RemoteError::Transport(
+                                "remote peer returned a non-text response".into(),
+                            )));
+                        }
+                    }
+                }
+            }
+
+            if failed {
+                socket = None;
+                batch = batch.split_off(failed_index);
+                let now = Instant::now();
+                if batch
+                    .iter()
+                    .any(|item| now.duration_since(item.created_at) > options.request_timeout)
+                {
+                    for mut item in batch {
+                        if let Some(tx) = item.reply_tx.take() {
+                            let _ = tx.send(Err(RemoteError::Transport(
+                                "connection lost and request timed out".into(),
+                            )));
+                        }
+                    }
+                    break 'batch_loop;
+                }
+                thread::sleep(backoff);
+                backoff = (backoff * 2).min(options.max_reconnect_backoff);
+                continue 'batch_loop;
+            }
+
+            break 'batch_loop;
+        }
+    }
 }
 
 #[allow(clippy::result_large_err)]

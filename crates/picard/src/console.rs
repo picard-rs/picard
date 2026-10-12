@@ -24,6 +24,11 @@ use crate::{
 mod server;
 pub use server::{ConsoleHandle, ConsoleOptions};
 
+#[cfg(not(target_arch = "wasm32"))]
+mod client;
+#[cfg(not(target_arch = "wasm32"))]
+pub use client::ConsolePeerClient;
+
 /// Largest request accepted by [`Console::handle_text`] and the built-in endpoint.
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 /// Serialized responses above this size are replaced by a `response_too_large` error.
@@ -196,6 +201,78 @@ impl ActorSystem {
         self.provider.console().register_peer(name.into(), sender);
     }
 
+    /// Connect a remote console peer over WebSocket using [`ConsolePeerClient`].
+    /// Forwarded queries and sends targeting `name` will connect to `endpoint`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn connect_console_peer(
+        &self,
+        name: impl Into<String>,
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+    ) {
+        let client = Arc::new(ConsolePeerClient::new(endpoint, token));
+        self.register_console_peer_query(
+            name,
+            Arc::new(move |request_text| client.query(request_text)),
+        );
+    }
+
+    /// Register a remote console peer reached over a remoting [`crate::remoting::RemoteConnection`].
+    /// Forwarded queries and sends targeting `name` will be sent to `/_picard/console`.
+    #[cfg(all(feature = "remoting", not(target_arch = "wasm32")))]
+    pub fn register_console_remote_peer(
+        &self,
+        name: impl Into<String>,
+        connection: crate::remoting::RemoteConnection,
+    ) {
+        let name = name.into();
+        let query_conn = connection.clone();
+        let send_conn = connection;
+        self.register_console_peer_query(
+            name.clone(),
+            Arc::new(move |request_text| {
+                let dest =
+                    crate::remoting::ActorAddress::local(uuid::Uuid::nil(), "/_picard/console");
+                let fut = query_conn.send(dest, None, Value::String(request_text.to_owned()));
+                let resp = crate::remoting::block_on(fut).map_err(|e| e.to_string())?;
+                resp.payload
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| "peer returned invalid console response".to_string())
+            }),
+        );
+        self.register_console_peer(
+            name,
+            Arc::new(move |path, message| {
+                let dest =
+                    crate::remoting::ActorAddress::local(uuid::Uuid::nil(), "/_picard/console");
+                let req = Request {
+                    id: 0,
+                    command: Command::Send {
+                        path: path.to_owned(),
+                        message,
+                        peer: None,
+                    },
+                };
+                let text = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+                let fut = send_conn.send(dest, None, Value::String(text));
+                let resp = crate::remoting::block_on(fut).map_err(|e| e.to_string())?;
+                let text = resp
+                    .payload
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "peer returned invalid response".to_string())?;
+                let resp: Response = serde_json::from_str(text).map_err(|e| e.to_string())?;
+                if let Some(err) = resp.error {
+                    Err(format!("{}: {}", err.code, err.message))
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+    }
+
     /// A console service for routing requests over an application-owned transport.
     pub fn console(&self) -> Console {
         Console {
@@ -295,6 +372,14 @@ impl Registry {
     }
 
     fn send_to_peer(&self, peer: &str, path: &str, message: Value) -> Result<Value, ConsoleError> {
+        if self.queries.contains_key(peer) {
+            let command = Command::Send {
+                path: path.to_owned(),
+                message,
+                peer: None,
+            };
+            return self.forward(peer, command);
+        }
         let sender = self
             .peers
             .get(peer)

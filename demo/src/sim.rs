@@ -106,6 +106,17 @@ impl Sim {
         peers: &[PeerSpec],
     ) -> Result<Self, String> {
         let mut sim = Self::start_inner(vehicles, Some(district), Some(peers.len() + 1))?;
+        let supervisor = sim.supervisor.clone();
+        sim.system.register_migration_handler(
+            "Vehicle",
+            std::sync::Arc::new(move |_sys, payload| {
+                let transfer: crate::msg::VehicleTransfer =
+                    serde_json::from_value(payload.state.clone())
+                        .map_err(|e| format!("cannot parse vehicle transfer: {e}"))?;
+                supervisor.tell(crate::msg::SupervisorMsg::VehicleArrival(transfer), None);
+                Ok(())
+            }),
+        );
         let (listener, links) =
             crate::remoting::start(&sim.system, district, listen, token, peers)?;
         sim.gateway

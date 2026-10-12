@@ -137,13 +137,15 @@ impl Actor for Gateway {
         }
     }
 
-    fn recv(&mut self, _: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
-        self.handle(msg);
+    fn recv(&mut self, ctx: &Context<Self::Msg>, msg: Self::Msg, _: Sender) {
+        self.handle(Some(ctx), msg);
     }
 }
 
 impl Gateway {
-    fn handle(&mut self, msg: GatewayMsg) {
+    fn handle(&mut self, ctx: Option<&Context<GatewayMsg>>, msg: GatewayMsg) {
+        #[cfg(not(feature = "remoting"))]
+        let _ = ctx;
         self.args.metrics.inc(&self.args.metrics.processed);
         match msg {
             GatewayMsg::Flush => {
@@ -222,7 +224,7 @@ impl Gateway {
             }
             GatewayMsg::Migrate { district, transfer } => {
                 #[cfg(feature = "remoting")]
-                self.forward_vehicle(district, transfer);
+                self.forward_vehicle(ctx, district, transfer);
                 #[cfg(not(feature = "remoting"))]
                 let _ = (district, transfer);
             }
@@ -349,7 +351,12 @@ impl Gateway {
     }
 
     #[cfg(feature = "remoting")]
-    fn forward_vehicle(&self, district: usize, transfer: crate::msg::VehicleTransfer) {
+    fn forward_vehicle(
+        &self,
+        ctx: Option<&Context<GatewayMsg>>,
+        district: usize,
+        transfer: crate::msg::VehicleTransfer,
+    ) {
         let Some(peer) = self
             .remote_peers
             .iter()
@@ -361,7 +368,32 @@ impl Gateway {
             );
             return;
         };
-        if let Err(err) = peer.send(SUPERVISOR_PATH, &SupervisorMsg::VehicleArrival(transfer)) {
+
+        let origin_district = self.args.district.unwrap_or(0);
+        let origin_name = crate::vehicle::actor_name(transfer.id, transfer.hop.saturating_sub(1));
+        let vehicle_path = format!("{SUPERVISOR_PATH}/district-{origin_district}/{origin_name}");
+        let dest_name = crate::vehicle::actor_name(transfer.id, transfer.hop);
+        let dest_path = format!("{SUPERVISOR_PATH}/district-{district}/{dest_name}");
+
+        let migrated = ctx.and_then(|c| {
+            serde_json::to_value(&transfer).ok().and_then(|state| {
+                c.system
+                    .migrate_actor(
+                        &vehicle_path,
+                        peer.system_id,
+                        Some(peer.endpoint.clone()),
+                        Some(&dest_path),
+                        "Vehicle",
+                        state,
+                        &peer.connection,
+                    )
+                    .ok()
+            })
+        });
+
+        if migrated.is_none()
+            && let Err(err) = peer.send(SUPERVISOR_PATH, &SupervisorMsg::VehicleArrival(transfer))
+        {
             eprintln!("cannot hand vehicle to district {district}: {err}");
         }
     }
@@ -424,29 +456,35 @@ mod tests {
             generation: 1,
             ..DistrictSnapshot::default()
         });
-        gateway.handle(GatewayMsg::DistrictStarted {
-            district: 4,
-            generation: 1,
-        });
-        gateway.handle(GatewayMsg::Snapshot(old.clone()));
-        gateway.handle(GatewayMsg::Flush);
+        gateway.handle(
+            None,
+            GatewayMsg::DistrictStarted {
+                district: 4,
+                generation: 1,
+            },
+        );
+        gateway.handle(None, GatewayMsg::Snapshot(old.clone()));
+        gateway.handle(None, GatewayMsg::Flush);
         assert_eq!(frames.borrow().districts.len(), 1);
-        gateway.handle(GatewayMsg::DistrictGone(4));
-        gateway.handle(GatewayMsg::Snapshot(old.clone()));
-        gateway.handle(GatewayMsg::Flush);
+        gateway.handle(None, GatewayMsg::DistrictGone(4));
+        gateway.handle(None, GatewayMsg::Snapshot(old.clone()));
+        gateway.handle(None, GatewayMsg::Flush);
         assert!(frames.borrow().districts.is_empty());
-        gateway.handle(GatewayMsg::DistrictStarted {
-            district: 4,
-            generation: 2,
-        });
+        gateway.handle(
+            None,
+            GatewayMsg::DistrictStarted {
+                district: 4,
+                generation: 2,
+            },
+        );
         let new = Arc::new(DistrictSnapshot {
             district: 4,
             generation: 2,
             ..DistrictSnapshot::default()
         });
-        gateway.handle(GatewayMsg::Snapshot(new));
-        gateway.handle(GatewayMsg::Snapshot(old));
-        gateway.handle(GatewayMsg::Flush);
+        gateway.handle(None, GatewayMsg::Snapshot(new));
+        gateway.handle(None, GatewayMsg::Snapshot(old));
+        gateway.handle(None, GatewayMsg::Flush);
         assert_eq!(frames.borrow().districts.len(), 1);
         assert_eq!(frames.borrow().districts[0].generation, 2);
     }
