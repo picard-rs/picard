@@ -24,7 +24,8 @@ pub struct Sim {
     #[cfg(feature = "remoting")]
     remote_peers: Vec<PeerLink>,
     #[cfg(feature = "remoting")]
-    _remote_listener: Option<Box<dyn picard::remoting::RemoteListener>>,
+    #[allow(dead_code)] // keeps the listener alive
+    remote_listener: Option<Box<dyn picard::remoting::RemoteListener>>,
 }
 
 impl Sim {
@@ -87,7 +88,7 @@ impl Sim {
             #[cfg(feature = "remoting")]
             remote_peers: Vec::new(),
             #[cfg(feature = "remoting")]
-            _remote_listener: None,
+            remote_listener: None,
         })
     }
 
@@ -105,7 +106,7 @@ impl Sim {
         sim.gateway
             .tell(crate::msg::GatewayMsg::SetRemotePeers(links.clone()), None);
         sim.remote_peers = links;
-        sim._remote_listener = Some(listener);
+        sim.remote_listener = Some(listener);
         Ok(sim)
     }
 

@@ -60,7 +60,7 @@ struct Cli {
     )]
     remote_listen: SocketAddr,
 
-    /// Shared peer token; use LIVING_CITY_REMOTE_TOKEN rather than a CLI value in deployments.
+    /// Shared peer token; use `LIVING_CITY_REMOTE_TOKEN` rather than a CLI value in deployments.
     #[cfg(feature = "remoting")]
     #[arg(
         long,
