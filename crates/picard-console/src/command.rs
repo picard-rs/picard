@@ -48,6 +48,15 @@ pub(crate) fn complete(line: &str, pos: usize, paths: &[String]) -> (usize, Vec<
     (start, candidates)
 }
 
+/// Whether the command carries a message payload, which is kept out of history.
+pub(crate) fn is_send(command: &Command) -> bool {
+    match command {
+        Command::Send { .. } => true,
+        Command::Forward { command, .. } => is_send(command),
+        _ => false,
+    }
+}
+
 pub(crate) enum Input {
     Command(Command),
     Help,
