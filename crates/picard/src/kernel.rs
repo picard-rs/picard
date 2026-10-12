@@ -81,6 +81,10 @@ where
     };
 
     let actor_ref = ActorRef::new(cell);
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    let console_actor = actor_ref.clone();
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    let console_mailbox = mailbox.clone();
 
     #[cfg(feature = "stats")]
     sys.stats_recorder().actor_created();
@@ -120,6 +124,10 @@ where
     };
 
     sys.exec.spawn(f).unwrap();
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    sys.provider
+        .console()
+        .register(console_actor, console_mailbox);
     Ok(kr)
 }
 

@@ -1,6 +1,6 @@
 # Diagnostics
 
-Picard has two optional Cargo features for observing a running system. Both are off by default and add no code when disabled.
+Picard has optional Cargo features for observing a running system. They are off by default and add no code when disabled. The [runtime console](console.md) provides authenticated WebSocket inspection and management; `tracing` and `stats` are described below.
 
 ```toml
 [dependencies]

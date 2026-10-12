@@ -1,0 +1,400 @@
+//! Runtime inspection and control protocol for the `console` feature.
+//!
+//! The WebSocket server is available on native targets and is never started implicitly.
+
+use std::{
+    any::Any,
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
+
+use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::{
+    Envelope, LocalMessage,
+    actor::{ActorRef, ActorReference, BasicActorRef},
+    kernel::mailbox::{Mailbox, MailboxSchedule},
+    system::{SystemCmd, SystemMsg},
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+mod server;
+#[cfg(not(target_arch = "wasm32"))]
+pub use server::{ConsoleHandle, ConsoleOptions};
+
+const HISTORY_LIMIT: usize = 64;
+#[cfg(feature = "serde")]
+const PAYLOAD_LIMIT: usize = 4096;
+
+/// One request and its client-selected correlation ID.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Request {
+    pub id: u64,
+    #[serde(flatten)]
+    pub command: Command,
+}
+
+/// Console operations. Paths are absolute, such as `/user/worker`.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Command {
+    Actors {
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "default_page_limit")]
+        limit: usize,
+    },
+    Inspect {
+        path: String,
+    },
+    Messages {
+        path: String,
+    },
+    Pause {
+        path: String,
+    },
+    Resume {
+        path: String,
+    },
+    Clear {
+        path: String,
+    },
+    Stop {
+        path: String,
+    },
+    Restart {
+        path: String,
+    },
+    Send {
+        path: String,
+        message: Value,
+    },
+}
+
+fn default_page_limit() -> usize {
+    100
+}
+
+/// Exactly one of `result` and `error` is present in a response.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Response {
+    pub id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ConsoleError>,
+}
+
+/// A protocol error, also used for failed management operations.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ConsoleError {
+    pub code: String,
+    pub message: String,
+}
+
+impl ConsoleError {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Registry {
+    actors: DashMap<String, Arc<dyn ConsoleActor>>,
+}
+
+impl Registry {
+    pub(crate) fn register<Msg: LocalMessage>(&self, actor: ActorRef<Msg>, mailbox: Mailbox<Msg>) {
+        self.actors.insert(
+            actor.path().to_string(),
+            Arc::new(TypedActor {
+                actor: actor.into(),
+                mailbox,
+            }),
+        );
+    }
+
+    pub(crate) fn remove(&self, path: &str) {
+        self.actors.remove(path);
+    }
+
+    pub(crate) fn enable_management(&self, path: &str) {
+        if let Some(actor) = self.actors.get(path) {
+            actor.enable_management();
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn enable_json<Msg: crate::Message>(&self, path: &str) {
+        if let Some(actor) = self.actors.get(path) {
+            actor.configure_json(JsonCodec {
+                encode: |message| {
+                    let message = message.downcast_ref::<Msg>().ok_or_else(|| {
+                        ConsoleError::new("message_type", "Message type did not match the actor")
+                    })?;
+                    let mut writer = PayloadWriter(Vec::new());
+                    serde_json::to_writer(&mut writer, message)
+                        .map_err(|err| ConsoleError::new("serialization", err.to_string()))?;
+                    serde_json::from_slice(&writer.0)
+                        .map_err(|err| ConsoleError::new("serialization", err.to_string()))
+                },
+                decode: |value| {
+                    serde_json::from_value::<Msg>(value)
+                        .map(crate::AnyMessage::new)
+                        .map_err(|err| ConsoleError::new("invalid_message", err.to_string()))
+                },
+            });
+        }
+    }
+
+    pub(crate) fn execute(&self, command: Command) -> Result<Value, ConsoleError> {
+        let path = match &command {
+            Command::Actors { offset, limit } => {
+                if !(1..=100).contains(limit) {
+                    return Err(ConsoleError::new(
+                        "invalid_request",
+                        "Actor page limit must be between 1 and 100",
+                    ));
+                }
+                let mut actors: Vec<_> = self
+                    .actors
+                    .iter()
+                    .map(|entry| (entry.key().clone(), Arc::clone(entry.value())))
+                    .collect();
+                actors.sort_by(|a, b| a.0.cmp(&b.0));
+                let total = actors.len();
+                let page: Vec<_> = actors
+                    .into_iter()
+                    .skip(*offset)
+                    .take(*limit)
+                    .map(|(_, actor)| actor.snapshot())
+                    .collect();
+                let end = offset.saturating_add(page.len());
+                let next_offset = (end < total).then_some(end);
+                return Ok(json!({ "actors": page, "total": total, "next_offset": next_offset }));
+            }
+            Command::Inspect { path }
+            | Command::Messages { path }
+            | Command::Pause { path }
+            | Command::Resume { path }
+            | Command::Clear { path }
+            | Command::Stop { path }
+            | Command::Restart { path }
+            | Command::Send { path, .. } => path,
+        };
+        let actor = self
+            .actors
+            .get(path)
+            .map(|entry| Arc::clone(entry.value()))
+            .ok_or_else(|| ConsoleError::new("not_found", format!("No actor at {path}")))?;
+        match command {
+            Command::Inspect { .. } => Ok(actor.snapshot()),
+            Command::Messages { .. } => Ok(actor.messages()),
+            Command::Pause { .. } => actor.pause(true),
+            Command::Resume { .. } => actor.pause(false),
+            Command::Clear { .. } => actor.clear(),
+            Command::Stop { .. } => actor.lifecycle(SystemCmd::Stop),
+            Command::Restart { .. } => actor.lifecycle(SystemCmd::Restart),
+            Command::Send { message, .. } => actor.send(message),
+            Command::Actors { .. } => unreachable!(),
+        }
+    }
+}
+
+trait ConsoleActor: Send + Sync {
+    fn snapshot(&self) -> Value;
+    fn messages(&self) -> Value;
+    fn pause(&self, paused: bool) -> Result<Value, ConsoleError>;
+    fn clear(&self) -> Result<Value, ConsoleError>;
+    fn lifecycle(&self, command: SystemCmd) -> Result<Value, ConsoleError>;
+    fn send(&self, message: Value) -> Result<Value, ConsoleError>;
+    fn enable_management(&self);
+    #[cfg(feature = "serde")]
+    fn configure_json(&self, codec: JsonCodec);
+}
+
+struct TypedActor<Msg: LocalMessage> {
+    actor: BasicActorRef,
+    mailbox: Mailbox<Msg>,
+}
+
+impl<Msg: LocalMessage> TypedActor<Msg> {
+    fn check_management(&self) -> Result<(), ConsoleError> {
+        if !self.mailbox.diagnostics().lock().unwrap().managed {
+            return Err(ConsoleError::new(
+                "protected_actor",
+                "Runtime actors can be inspected but cannot be managed through the console",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl<Msg: LocalMessage> ConsoleActor for TypedActor<Msg> {
+    fn snapshot(&self) -> Value {
+        let state = self.mailbox.diagnostics().lock().unwrap();
+        json!({
+            "path": self.actor.path().as_str(),
+            "parent": self.actor.parent().path().as_str(),
+            "message_type": std::any::type_name::<Msg>(),
+            "json_send": state.codec.is_some(),
+            "manageable": state.managed,
+            "mailbox": {
+                "user_messages": self.mailbox.user_queue_len(),
+                "system_messages": self.mailbox.system_queue_len(),
+                "paused": state.paused,
+                "suspended": self.mailbox.is_suspended(),
+                "scheduled": self.mailbox.is_scheduled(),
+            },
+        })
+    }
+
+    fn messages(&self) -> Value {
+        let state = self.mailbox.diagnostics().lock().unwrap();
+        json!({ "limit": HISTORY_LIMIT, "events": state.history })
+    }
+
+    fn pause(&self, paused: bool) -> Result<Value, ConsoleError> {
+        self.check_management()?;
+        self.mailbox.diagnostics().lock().unwrap().paused = paused;
+        if !paused {
+            self.actor.cell.kernel().schedule();
+        }
+        Ok(json!({ "paused": paused }))
+    }
+
+    fn clear(&self) -> Result<Value, ConsoleError> {
+        self.check_management()?;
+        let mut state = self.mailbox.diagnostics().lock().unwrap();
+        if !state.paused {
+            return Err(ConsoleError::new(
+                "not_paused",
+                "Pause the mailbox before clearing it",
+            ));
+        }
+        let mut cleared = 0;
+        let mut discarded = Vec::new();
+        while let Ok(envelope) = self.mailbox.try_dequeue() {
+            state.push(metadata(&envelope, "cleared"));
+            discarded.push(envelope);
+            cleared += 1;
+        }
+        // Message destructors may send messages; never run them under the mailbox lock.
+        drop(state);
+        drop(discarded);
+        Ok(json!({ "cleared": cleared }))
+    }
+
+    fn lifecycle(&self, command: SystemCmd) -> Result<Value, ConsoleError> {
+        self.check_management()?;
+        self.actor
+            .cell
+            .send_sys_msg(Envelope {
+                msg: SystemMsg::Command(command),
+                sender: None,
+            })
+            .map_err(|_| ConsoleError::new("delivery_failed", "Actor has terminated"))?;
+        Ok(json!({ "accepted": true }))
+    }
+
+    fn send(&self, message: Value) -> Result<Value, ConsoleError> {
+        self.check_management()?;
+        let codec = self.mailbox.diagnostics().lock().unwrap().codec;
+        let codec = codec.ok_or_else(|| {
+            ConsoleError::new(
+                "json_unavailable",
+                "JSON sends require console + serde and an actor created with a Message bound",
+            )
+        })?;
+        let mut message = (codec.decode)(message)?;
+        self.actor
+            .cell
+            .send_any_msg(&mut message, None)
+            .map_err(|_| ConsoleError::new("delivery_failed", "Actor has terminated"))?;
+        Ok(json!({ "accepted": true }))
+    }
+
+    fn enable_management(&self) {
+        self.mailbox.diagnostics().lock().unwrap().managed = true;
+    }
+
+    #[cfg(feature = "serde")]
+    fn configure_json(&self, codec: JsonCodec) {
+        self.mailbox.diagnostics().lock().unwrap().codec = Some(codec);
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct JsonCodec {
+    encode: fn(&dyn Any) -> Result<Value, ConsoleError>,
+    decode: fn(Value) -> Result<crate::AnyMessage, ConsoleError>,
+}
+
+#[derive(Default)]
+pub(crate) struct MailboxDiagnostics {
+    pub(crate) paused: bool,
+    history: VecDeque<Value>,
+    codec: Option<JsonCodec>,
+    managed: bool,
+}
+
+impl MailboxDiagnostics {
+    pub(crate) fn push(&mut self, entry: Value) {
+        if self.history.len() == HISTORY_LIMIT {
+            self.history.pop_front();
+        }
+        self.history.push_back(entry);
+    }
+}
+
+pub(crate) type SharedDiagnostics = Arc<Mutex<MailboxDiagnostics>>;
+
+fn metadata<Msg: LocalMessage>(envelope: &Envelope<Msg>, event: &str) -> Value {
+    json!({
+        "event": event,
+        "message_type": std::any::type_name::<Msg>(),
+        "sender": envelope.sender.as_ref().map(|sender| sender.path().as_str()),
+    })
+}
+
+pub(crate) fn message_event<Msg: LocalMessage>(
+    diagnostics: &SharedDiagnostics,
+    envelope: &Envelope<Msg>,
+    event: &str,
+) -> Value {
+    let mut entry = metadata(envelope, event);
+    let codec = diagnostics.lock().unwrap().codec;
+    // User-defined serializers must not execute under a runtime lock.
+    if let Some(codec) = codec {
+        match (codec.encode)(&envelope.msg) {
+            Ok(payload) => entry["message"] = payload,
+            Err(err) => {
+                entry["payload_error"] = json!(err.message.chars().take(256).collect::<String>());
+            }
+        }
+    }
+    entry
+}
+
+#[cfg(feature = "serde")]
+struct PayloadWriter(Vec<u8>);
+
+#[cfg(feature = "serde")]
+impl std::io::Write for PayloadWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > PAYLOAD_LIMIT - self.0.len() {
+            return Err(std::io::Error::other("Payload exceeds 4096 bytes"));
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}

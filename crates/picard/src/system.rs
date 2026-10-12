@@ -647,7 +647,7 @@ impl ActorSystem {
 
         let name = rand::random::<u64>().to_string();
         self.provider
-            .create_actor(
+            .create_local_actor(
                 Props::new_args::<ShutdownActor, _>(tx),
                 &name,
                 self.temp_root(),
@@ -705,7 +705,7 @@ impl ActorRefFactory for ActorSystem {
         A: Actor,
     {
         self.provider
-            .create_actor(props, name, self.user_root(), self)
+            .create_local_actor(props, name, self.user_root(), self)
     }
 
     fn stop(&self, actor: impl ActorReference) {
@@ -759,7 +759,7 @@ impl ActorRefFactory for &ActorSystem {
         A: Actor,
     {
         self.provider
-            .create_actor(props, name, self.user_root(), self)
+            .create_local_actor(props, name, self.user_root(), self)
     }
 
     fn stop(&self, actor: impl ActorReference) {
@@ -990,7 +990,7 @@ fn sys_actor_of_props<A>(
 where
     A: Actor,
 {
-    prov.create_actor(props, name, sys.sys_root(), sys)
+    prov.create_local_actor(props, name, sys.sys_root(), sys)
         .map_err(|_| SystemError::ModuleFailed(name.into()))
 }
 
@@ -1002,7 +1002,7 @@ fn sys_actor_of<A>(
 where
     A: ActorFactory,
 {
-    prov.create_actor(Props::produce::<A>(), name, sys.sys_root(), sys)
+    prov.create_local_actor(Props::produce::<A>(), name, sys.sys_root(), sys)
         .map_err(|_| SystemError::ModuleFailed(name.into()))
 }
 
@@ -1017,7 +1017,7 @@ where
     Args: ActorArgs,
     A: ActorFactoryArgs<Args>,
 {
-    prov.create_actor(Props::new_args::<A, _>(args), name, sys.sys_root(), sys)
+    prov.create_local_actor(Props::new_args::<A, _>(args), name, sys.sys_root(), sys)
         .map_err(|_| SystemError::ModuleFailed(name.into()))
 }
 

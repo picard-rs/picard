@@ -11,6 +11,11 @@ impl ActorPath {
     pub fn new(path: &str) -> Self {
         Self(Arc::from(path))
     }
+
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl PartialEq for ActorPath {

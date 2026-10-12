@@ -22,6 +22,7 @@ Picard provides:
 - Out-of-the-box, configurable, non-blocking logging
 - Command Query Responsibility Segregation (CQRS)
 - Easily run futures
+- Optional authenticated WebSocket [runtime console](web/docs/console.md) with an interactive terminal REPL
 
 [Website](https://picard.rs) | [API Docs](https://docs.rs/picard)
 
@@ -72,6 +73,7 @@ fn main() {
 
 Official crates that provide additional functionality:
 
+- [picard-console](crates/picard-console): Interactive actor and mailbox inspection, management, and typed JSON message sends
 - [picard-cqrs](https://github.com/picard-rs/picard-cqrs): Command Query Responsibility Separation support
 - [picard-testkit](https://github.com/picard-rs/picard-testkit): Tools to make testing easier
 - [picard-patterns](https://github.com/picard-rs/picard-patterns): Common actor patterns, including `transform!` and 'ask'

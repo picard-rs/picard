@@ -40,6 +40,11 @@ impl<Msg: LocalMessage> QueueReader<Msg> {
     pub fn has_msgs(&self) -> bool {
         !self.rx.is_empty()
     }
+
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    pub(crate) fn len(&self) -> usize {
+        self.rx.len()
+    }
 }
 
 #[derive(Clone, Debug)]

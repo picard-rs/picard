@@ -43,6 +43,8 @@ pub trait AnySender: Send + Sync {
 pub struct MailboxSender<Msg: LocalMessage> {
     queue: QueueWriter<Msg>,
     scheduled: Arc<AtomicBool>,
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    diagnostics: Option<crate::console::SharedDiagnostics>,
 }
 
 impl<Msg: LocalMessage> Clone for MailboxSender<Msg> {
@@ -50,6 +52,8 @@ impl<Msg: LocalMessage> Clone for MailboxSender<Msg> {
         Self {
             queue: self.queue.clone(),
             scheduled: self.scheduled.clone(),
+            #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+            diagnostics: self.diagnostics.clone(),
         }
     }
 }
@@ -59,6 +63,18 @@ where
     Msg: LocalMessage,
 {
     pub fn try_enqueue(&self, msg: Envelope<Msg>) -> EnqueueResult<Msg> {
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        if let Some(diagnostics) = &self.diagnostics {
+            let mut entry = crate::console::message_event(diagnostics, &msg, "enqueued");
+            let mut state = diagnostics.lock().unwrap();
+            // Keep enqueue and history ordering consistent with console clears and dequeues.
+            let result = self.queue.try_enqueue(msg);
+            if result.is_err() {
+                entry["event"] = serde_json::json!("delivery_failed");
+            }
+            state.push(entry);
+            return result;
+        }
         self.queue.try_enqueue(msg)
     }
 }
@@ -98,9 +114,16 @@ where
     }
 }
 
-#[derive(Clone)]
 pub struct Mailbox<Msg: LocalMessage> {
     inner: Arc<MailboxInner<Msg>>,
+}
+
+impl<Msg: LocalMessage> Clone for Mailbox<Msg> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 pub struct MailboxInner<Msg: LocalMessage> {
@@ -109,6 +132,8 @@ pub struct MailboxInner<Msg: LocalMessage> {
     sys_queue: QueueReader<SystemMsg>,
     suspended: Arc<AtomicBool>,
     scheduled: Arc<AtomicBool>,
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    diagnostics: crate::console::SharedDiagnostics,
 }
 
 impl<Msg: LocalMessage> Mailbox<Msg> {
@@ -133,12 +158,51 @@ impl<Msg: LocalMessage> Mailbox<Msg> {
         self.inner.suspended.store(b, Ordering::Relaxed);
     }
 
-    fn is_suspended(&self) -> bool {
+    pub(crate) fn is_suspended(&self) -> bool {
         self.inner.suspended.load(Ordering::Relaxed)
     }
 
     fn msg_process_limit(&self) -> u32 {
         self.inner.msg_process_limit
+    }
+
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    pub(crate) fn diagnostics(&self) -> &crate::console::SharedDiagnostics {
+        &self.inner.diagnostics
+    }
+
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    pub(crate) fn user_queue_len(&self) -> usize {
+        self.inner.queue.len()
+    }
+
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    pub(crate) fn system_queue_len(&self) -> usize {
+        self.inner.sys_queue.len()
+    }
+
+    fn is_paused(&self) -> bool {
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        return self.diagnostics().lock().unwrap().paused;
+        #[cfg(not(all(feature = "console", not(target_arch = "wasm32"))))]
+        false
+    }
+
+    fn try_process_dequeue(&self) -> Result<Envelope<Msg>, QueueEmpty> {
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        {
+            let state = self.diagnostics().lock().unwrap();
+            if state.paused {
+                return Err(QueueEmpty);
+            }
+            let envelope = self.try_dequeue()?;
+            drop(state);
+            let event = crate::console::message_event(self.diagnostics(), &envelope, "received");
+            self.diagnostics().lock().unwrap().push(event);
+            Ok(envelope)
+        }
+        #[cfg(not(all(feature = "console", not(target_arch = "wasm32"))))]
+        self.try_dequeue()
     }
 }
 
@@ -165,15 +229,23 @@ where
     let (sqw, sqr) = queue::<SystemMsg>();
 
     let scheduled = Arc::new(AtomicBool::new(false));
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    let diagnostics = Arc::new(std::sync::Mutex::new(
+        crate::console::MailboxDiagnostics::default(),
+    ));
 
     let sender = MailboxSender {
         queue: qw,
         scheduled: scheduled.clone(),
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        diagnostics: Some(diagnostics.clone()),
     };
 
     let sys_sender = MailboxSender {
         queue: sqw,
         scheduled: scheduled.clone(),
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        diagnostics: None,
     };
 
     let mailbox = MailboxInner {
@@ -182,6 +254,8 @@ where
         sys_queue: sqr,
         suspended: Arc::new(AtomicBool::new(true)),
         scheduled,
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        diagnostics,
     };
 
     let mailbox = Mailbox {
@@ -219,7 +293,8 @@ where
 
     sen.mbox.set_scheduled(false);
 
-    let has_msgs = sen.mbox.has_msgs() || sen.mbox.has_sys_msgs();
+    let has_msgs = (sen.mbox.has_msgs() && !sen.mbox.is_suspended() && !sen.mbox.is_paused())
+        || sen.mbox.has_sys_msgs();
     if has_msgs && !sen.mbox.is_scheduled() {
         ctx.kernel.schedule();
     }
@@ -236,8 +311,8 @@ fn process_msgs<A>(
     let mut count = 0;
 
     loop {
-        if count < mbox.msg_process_limit() {
-            match mbox.try_dequeue() {
+        if count < mbox.msg_process_limit() && actor.is_some() && !mbox.is_suspended() {
+            match mbox.try_process_dequeue() {
                 Ok(msg) => {
                     let (msg, sender) = (msg.msg, msg.sender);
                     #[cfg(feature = "tracing")]

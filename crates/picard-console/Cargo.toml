@@ -1,0 +1,23 @@
+[package]
+name = "picard-console"
+version = "0.4.2"
+description = "Interactive WebSocket console for inspecting and managing Picard actors."
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+picard = { workspace = true, features = ["console"] }
+serde_json = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rustyline = "17"
+tungstenite = "0.29"
+
+[dev-dependencies]
+futures.workspace = true

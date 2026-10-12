@@ -24,12 +24,16 @@ pub struct Provider {
 
 struct ProviderInner {
     paths: DashSet<ActorPath>,
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    console: crate::console::Registry,
 }
 
 impl Provider {
     pub fn new() -> Self {
         let inner = ProviderInner {
             paths: DashSet::new(),
+            #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+            console: crate::console::Registry::default(),
         };
 
         Self {
@@ -38,6 +42,41 @@ impl Provider {
     }
 
     pub fn create_actor<A>(
+        &self,
+        props: BoxActorProd<A>,
+        name: &str,
+        parent: &BasicActorRef,
+        sys: &ActorSystem,
+    ) -> Result<ActorRef<A::Msg>, CreateError>
+    where
+        A: Actor + 'static,
+        A::Msg: crate::Message,
+    {
+        let actor = self.create_uninitialized_actor(props, name, parent, sys)?;
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        self.console().enable_management(actor.path().as_str());
+        #[cfg(all(feature = "console", feature = "serde", not(target_arch = "wasm32")))]
+        self.console().enable_json::<A::Msg>(actor.path().as_str());
+        actor.send_system_message(SystemMsg::ActorInit);
+        Ok(actor)
+    }
+
+    pub fn create_local_actor<A>(
+        &self,
+        props: BoxActorProd<A>,
+        name: &str,
+        parent: &BasicActorRef,
+        sys: &ActorSystem,
+    ) -> Result<ActorRef<A::Msg>, CreateError>
+    where
+        A: Actor + 'static,
+    {
+        let actor = self.create_uninitialized_actor(props, name, parent, sys)?;
+        actor.send_system_message(SystemMsg::ActorInit);
+        Ok(actor)
+    }
+
+    fn create_uninitialized_actor<A>(
         &self,
         props: BoxActorProd<A>,
         name: &str,
@@ -83,7 +122,6 @@ impl Provider {
         let actor = ActorRef::new(cell);
         let child = BasicActorRef::from(actor.clone());
         parent.cell.add_child(child);
-        actor.send_system_message(SystemMsg::ActorInit);
 
         Ok(actor)
     }
@@ -98,6 +136,13 @@ impl Provider {
 
     pub fn unregister(&self, path: &ActorPath) {
         self.inner.paths.remove(path);
+        #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+        self.inner.console.remove(path.as_str());
+    }
+
+    #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+    pub(crate) fn console(&self) -> &crate::console::Registry {
+        &self.inner.console
     }
 }
 

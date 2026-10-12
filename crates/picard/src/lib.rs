@@ -1,6 +1,8 @@
 mod validate;
 
 pub mod actor;
+#[cfg(all(feature = "console", not(target_arch = "wasm32")))]
+pub mod console;
 pub mod kernel;
 pub mod platform;
 pub mod system;

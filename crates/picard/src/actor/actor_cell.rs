@@ -555,7 +555,7 @@ impl<Msg: LocalMessage> ActorRefFactory for Context<Msg> {
     {
         self.system
             .provider
-            .create_actor(props, name, &self.myself().into(), &self.system)
+            .create_local_actor(props, name, &self.myself().into(), &self.system)
     }
 
     fn stop(&self, actor: impl ActorReference) {
