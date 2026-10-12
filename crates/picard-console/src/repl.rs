@@ -220,7 +220,7 @@ impl Client {
         request
             .headers_mut()
             .insert("Authorization", format!("Bearer {token}").parse()?);
-        let (socket, _) = connect(request)?;
+        let (socket, _) = connect(request).map_err(|err| connect_error(&err, url))?;
         if let MaybeTlsStream::Plain(stream) = socket.get_ref() {
             stream.set_read_timeout(Some(Duration::from_secs(5)))?;
             stream.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -281,6 +281,26 @@ impl Client {
         }
         Ok(actors)
     }
+}
+
+fn connect_error(error: &tungstenite::Error, url: &str) -> String {
+    use tungstenite::{Error, error::UrlError, http::StatusCode};
+    let hint = match error {
+        Error::Url(UrlError::UnableToConnect(_)) | Error::Io(_) => {
+            "Nothing accepted the connection. Check that the application is running with the \
+             `console` feature and that its console endpoint is started (Living City: \
+             `cargo run -p living-city --features console -- --console-listen 127.0.0.1:9000` \
+             with PICARD_CONSOLE_TOKEN set)."
+        }
+        Error::Http(response) if response.status() == StatusCode::UNAUTHORIZED => {
+            "The server rejected the token. Set PICARD_CONSOLE_TOKEN to the application's token."
+        }
+        Error::Http(response) if response.status() == StatusCode::NOT_FOUND => {
+            "The server has no console at this path; check the URL's path."
+        }
+        _ => return format!("Cannot connect to {url}: {error}"),
+    };
+    format!("Cannot connect to {url}: {error}\n{hint}")
 }
 
 fn history_path() -> Option<PathBuf> {

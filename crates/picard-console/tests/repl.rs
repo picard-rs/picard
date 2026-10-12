@@ -113,3 +113,41 @@ fn repl_help_and_missing_credentials_are_explicit() {
             .contains("Set PICARD_CONSOLE_TOKEN")
     );
 }
+
+#[test]
+fn connection_failures_explain_how_to_start_or_authenticate() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let refused = Command::new(env!("CARGO_BIN_EXE_picard-console"))
+        .arg(format!("ws://127.0.0.1:{port}/console"))
+        .env("PICARD_CONSOLE_TOKEN", TOKEN)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8(refused.stderr).unwrap();
+    assert!(stderr.contains("--console-listen"), "{stderr}");
+
+    let sys = ActorSystem::new().unwrap();
+    let server = sys
+        .start_console(ConsoleOptions {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            token: TOKEN.into(),
+        })
+        .unwrap();
+    let rejected = Command::new(env!("CARGO_BIN_EXE_picard-console"))
+        .arg(format!("ws://{}/console", server.local_addr()))
+        .env(
+            "PICARD_CONSOLE_TOKEN",
+            "wrong-token-wrong-token-wrong-token",
+        )
+        .output()
+        .unwrap();
+    server.stop().unwrap();
+    futures::executor::block_on(sys.shutdown()).unwrap();
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8(rejected.stderr).unwrap();
+    assert!(stderr.contains("rejected the token"), "{stderr}");
+}
