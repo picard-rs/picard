@@ -102,7 +102,7 @@ struct ServerArgs {
     port: u16,
 
     /// Initial number of vehicles.
-    #[arg(long, env = "LIVING_CITY_VEHICLES", default_value_t = 400)]
+    #[arg(long, env = "LIVING_CITY_VEHICLES", default_value_t = 100)]
     vehicles: usize,
 }
 
@@ -124,6 +124,21 @@ enum Command {
         #[arg(long, env = "LIVING_CITY_LOADTEST_SECS", default_value_t = 20)]
         secs: u64,
     },
+}
+
+#[cfg(feature = "remoting")]
+fn initial_vehicles_for_district(total: usize, district: usize, peers: &[PeerSpec]) -> usize {
+    let mut districts = peers.iter().map(|peer| peer.district).collect::<Vec<_>>();
+    districts.push(district);
+    districts.sort_unstable();
+    districts.dedup();
+
+    let rank = districts
+        .iter()
+        .position(|&id| id == district)
+        .expect("local district is included in the active districts");
+    let base = total / districts.len();
+    base + usize::from(rank < total % districts.len())
 }
 
 #[cfg(feature = "console")]
@@ -178,13 +193,16 @@ async fn run(cli: Cli) -> Result<(), String> {
     let distributed = cli.district.is_some();
     #[cfg(feature = "remoting")]
     let sim = match cli.district {
-        Some(district) => Sim::start_remote(
-            vehicles,
-            district,
-            cli.remote_listen,
-            cli.remote_token.clone().expect("validated remote token"),
-            &cli.connect,
-        )?,
+        Some(district) => {
+            let local_vehicles = initial_vehicles_for_district(vehicles, district, &cli.connect);
+            Sim::start_remote(
+                local_vehicles,
+                district,
+                cli.remote_listen,
+                cli.remote_token.clone().expect("validated remote token"),
+                &cli.connect,
+            )?
+        }
         None => Sim::start(vehicles)?,
     };
     #[cfg(not(feature = "remoting"))]
@@ -320,7 +338,7 @@ mod tests {
         let cli = Cli::try_parse_from(["living-city"]).unwrap();
         assert_eq!(cli.server.host, "127.0.0.1".parse::<IpAddr>().unwrap());
         assert_eq!(cli.server.port, 8080);
-        assert_eq!(cli.server.vehicles, 400);
+        assert_eq!(cli.server.vehicles, 100);
         assert!(cli.command.is_none());
         let cli = Cli::try_parse_from([
             "living-city",
@@ -335,6 +353,27 @@ mod tests {
         assert_eq!(cli.server.host, "::1".parse::<IpAddr>().unwrap());
         assert_eq!(cli.server.port, 0);
         assert_eq!(cli.server.vehicles, 42);
+    }
+
+    #[cfg(feature = "remoting")]
+    #[test]
+    fn initial_distributed_vehicle_target_is_split_across_active_districts() {
+        let targets = (0..9)
+            .map(|district| {
+                let peers = (0..9)
+                    .filter(|&peer| peer != district)
+                    .map(|peer| PeerSpec {
+                        district: peer,
+                        endpoint: format!("ws://district-{peer}:9100/remoting"),
+                    })
+                    .collect::<Vec<_>>();
+                initial_vehicles_for_district(100, district, &peers)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(targets.iter().sum::<usize>(), 100);
+        assert_eq!(targets[0], 12);
+        assert_eq!(targets[8], 11);
     }
 
     #[test]

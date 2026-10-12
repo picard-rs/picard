@@ -363,13 +363,13 @@
   <aside id="left">
     <h2>Scenario A · Concurrency</h2>
     <div class="row" id="counts"></div>
-    <div class="note" style="margin-top:4px">Target vehicles, split across active districts. Spawned in batches so the
-      UI never blocks.</div>
-    <h2>Scenario D · Surge</h2>
+    <div class="note" style="margin-top:4px">Starts with 100 target vehicles, split across active districts. Spawned in
+      batches so the UI never blocks.</div>
+    <h2>Scenario B · Surge</h2>
     <div class="row"><button id="surge" class="danger"
         title="Spawn 800 vehicles that all head for the centre of the selected district">Surge in selected
         district</button></div>
-    <h2>Scenario E · Districts</h2>
+    <h2>Scenario C · Districts</h2>
     <div id="districts"></div>
     <div class="note" style="margin-top:4px">Click a district to select it. Add or remove it at runtime: its whole actor
       subtree is created or stopped.</div>
@@ -382,7 +382,8 @@
     <h2>About the data</h2>
     <div class="note">Mailbox depth is not exposed by Picard, so it is not shown. Tick delay is the real time a tick
       message spends between being sent and handled by a sampled vehicle (about 1 in 16). CPU and memory come from
-      <code>/proc</code>.</div>
+      <code>/proc</code>.
+    </div>
   </aside>
 
   <div id="main">
@@ -435,6 +436,7 @@
     let fitted = false, paused = false;
     const hist = { msgs: [], dmean: [], dp95: [], trips: [], cong: [], cpu: [], rss: [], lastUptime: -1 };
     const HIST = 120;
+    const INITIAL_TARGET_VEHICLES = 100;
     const STATE_COLORS = ["#3ddc97", "#ffc857", "#4cc2ff", "#7f8da8"];
     const STATE_NAMES = ["moving", "waiting", "crossing", "parked"];
     const COUNTS = [100, 1000, 5000, 10000];
@@ -479,7 +481,7 @@
         onText(e.data);
       };
       worker.onerror = e => { $("conn").textContent = "error: " + e.message; };
-      worker.postMessage({ start: 400 });
+      worker.postMessage({ start: INITIAL_TARGET_VEHICLES });
     }
 
     function worldToScreen(x, y) { return [(x * 40 + 40 - cam.x) * cam.z, (y * 40 + 40 - cam.y) * cam.z]; }
