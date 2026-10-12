@@ -31,3 +31,17 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --release
+
+  feature-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests with optional Picard features
+        run: cargo test --workspace --exclude living-city --features picard/serde,picard/tracing,picard/stats,picard/console

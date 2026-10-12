@@ -270,43 +270,31 @@ impl fmt::Debug for ActorCell {
 impl TmpActorRefFactory for ActorCell {
     fn tmp_actor_of_props<A: Actor>(
         &self,
-        _props: BoxActorProd<A>,
-    ) -> Result<ActorRef<A::Msg>, CreateError> {
-        let name = rand::random::<u64>();
-        let _name = format!("{name}");
-
-        // self.inner
-        //     .kernel
-        //     .create_actor(props, &name, &self.inner.system.temp_root())
-        unimplemented!()
+        props: BoxActorProd<A>,
+    ) -> Result<ActorRef<A::Msg>, CreateError>
+    where
+        <A as Actor>::Msg: Message,
+    {
+        self.inner.system.tmp_actor_of_props(props)
     }
 
-    fn tmp_actor_of<A: ActorFactory>(&self) -> Result<ActorRef<<A as Actor>::Msg>, CreateError> {
-        let name = rand::random::<u64>();
-        let _name = format!("{name}");
-
-        // self.inner
-        //     .kernel
-        //     .create_actor(props, &name, &self.inner.system.temp_root())
-        unimplemented!()
+    fn tmp_actor_of<A: ActorFactory>(&self) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
+    where
+        <A as Actor>::Msg: Message,
+    {
+        self.inner.system.tmp_actor_of::<A>()
     }
 
     fn tmp_actor_of_args<A, Args>(
         &self,
-        _args: Args,
+        args: Args,
     ) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
     where
         Args: ActorArgs,
         A: ActorFactoryArgs<Args>,
         <A as Actor>::Msg: Message,
     {
-        let name = rand::random::<u64>();
-        let _name = format!("{name}");
-
-        // self.inner
-        //     .kernel
-        //     .create_actor(props, &name, &self.inner.system.temp_root())
-        unimplemented!()
+        self.inner.system.tmp_actor_of_args::<A, _>(args)
     }
 }
 
@@ -565,6 +553,36 @@ impl<Msg: LocalMessage> ActorRefFactory for Context<Msg> {
 
     fn stop(&self, actor: impl ActorReference) {
         actor.stop();
+    }
+}
+
+impl<Msg: LocalMessage> TmpActorRefFactory for Context<Msg> {
+    fn tmp_actor_of_props<A>(&self, props: BoxActorProd<A>) -> Result<ActorRef<A::Msg>, CreateError>
+    where
+        A: Actor,
+        <A as Actor>::Msg: Message,
+    {
+        self.system.tmp_actor_of_props(props)
+    }
+
+    fn tmp_actor_of<A>(&self) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
+    where
+        A: ActorFactory + Actor,
+        <A as Actor>::Msg: Message,
+    {
+        self.system.tmp_actor_of::<A>()
+    }
+
+    fn tmp_actor_of_args<A, Args>(
+        &self,
+        args: Args,
+    ) -> Result<ActorRef<<A as Actor>::Msg>, CreateError>
+    where
+        Args: ActorArgs,
+        A: ActorFactoryArgs<Args>,
+        <A as Actor>::Msg: Message,
+    {
+        self.system.tmp_actor_of_args::<A, _>(args)
     }
 }
 

@@ -231,4 +231,5 @@ The inactivity time to sleep can be changed in `picard.toml`:
 sleep_after_secs = 120
 ```
 
-To see a example project using Picard CQRS click here [TODO]
+For usage examples, see the
+[picard-cqrs crate README](https://github.com/picard-rs/picard/tree/main/crates/picard-cqrs#readme).

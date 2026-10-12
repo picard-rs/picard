@@ -135,7 +135,9 @@ Picard adds to this by providing a familiar actor model API which in turn makes 
 
 ## Rust Version
 
-Picard is currently built using the **latest Rust Nightly**.
+Picard is tested on stable Rust. The workspace uses the Rust 2024 edition
+(requiring Rust 1.85 or newer); no minimum supported Rust version is currently
+promised for the full workspace and its dependencies.
 
 ## Contributing
 

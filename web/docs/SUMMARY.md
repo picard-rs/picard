@@ -8,6 +8,7 @@
 - [Fault Tolerance](supervision.md)
 - [Actor Selection](selection.md)
 - [Channels](channels.md)
+- [Clustering roadmap](cluster.md)
 - [Message Scheduling](scheduling.md)
 - [Configuration](config.md)
 - [Logging](logging.md)
