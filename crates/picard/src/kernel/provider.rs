@@ -13,7 +13,7 @@ use crate::{
     },
     kernel::kernel,
     kernel::mailbox::mailbox,
-    system::{ActorSystem, SysActors, SystemMsg},
+    system::{ActorSystem, SysActors, SystemCmd, SystemMsg},
     validate::validate_name,
 };
 
@@ -52,12 +52,12 @@ impl Provider {
         A: Actor + 'static,
         A::Msg: crate::Message,
     {
-        let actor = self.create_uninitialized_actor(props, name, parent, sys)?;
+        let (actor, stop) = self.create_uninitialized_actor(props, name, parent, sys)?;
         #[cfg(all(feature = "console", not(target_arch = "wasm32")))]
         self.console().enable_management(actor.path().as_str());
         #[cfg(all(feature = "console", feature = "serde", not(target_arch = "wasm32")))]
         self.console().enable_json::<A::Msg>(actor.path().as_str());
-        actor.send_system_message(SystemMsg::ActorInit);
+        Self::init(&actor, stop);
         Ok(actor)
     }
 
@@ -71,9 +71,18 @@ impl Provider {
     where
         A: Actor + 'static,
     {
-        let actor = self.create_uninitialized_actor(props, name, parent, sys)?;
-        actor.send_system_message(SystemMsg::ActorInit);
+        let (actor, stop) = self.create_uninitialized_actor(props, name, parent, sys)?;
+        Self::init(&actor, stop);
         Ok(actor)
+    }
+
+    /// Starts the actor, stopping it straight away when its parent is already terminating
+    /// so the parent's termination is not blocked by a child it never told to stop.
+    fn init<Msg: crate::LocalMessage>(actor: &ActorRef<Msg>, stop: bool) {
+        actor.send_system_message(SystemMsg::ActorInit);
+        if stop {
+            actor.send_system_message(SystemCmd::Stop.into());
+        }
     }
 
     fn create_uninitialized_actor<A>(
@@ -82,7 +91,7 @@ impl Provider {
         name: &str,
         parent: &BasicActorRef,
         sys: &ActorSystem,
-    ) -> Result<ActorRef<A::Msg>, CreateError>
+    ) -> Result<(ActorRef<A::Msg>, bool), CreateError>
     where
         A: Actor + 'static,
     {
@@ -121,9 +130,9 @@ impl Provider {
 
         let actor = ActorRef::new(cell);
         let child = BasicActorRef::from(actor.clone());
-        parent.cell.add_child(child);
+        let stop = parent.cell.add_child(child);
 
-        Ok(actor)
+        Ok((actor, stop))
     }
 
     fn register(&self, path: &ActorPath) -> Result<(), CreateError> {
@@ -221,7 +230,7 @@ fn guardian(name: &str, path: &str, root: &BasicActorRef, sys: &ActorSystem) -> 
     let actor_ref = ActorRef::new(cell);
 
     let actor = BasicActorRef::from(actor_ref);
-    root.cell.add_child(actor.clone());
+    let _ = root.cell.add_child(actor.clone());
     actor
 }
 

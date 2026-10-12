@@ -309,3 +309,53 @@ fn context_schedule_at_time_preserves_subsecond_precision() {
         "context scheduled message missed its sub-second deadline"
     );
 }
+
+type Gate = (
+    ChannelSender<()>,
+    std::sync::Arc<std::sync::Mutex<mpsc::Receiver<()>>>,
+);
+
+struct BlockingStop(Gate);
+
+impl ActorFactoryArgs<Gate> for BlockingStop {
+    fn create_args(gate: Gate) -> Self {
+        Self(gate)
+    }
+}
+
+impl Actor for BlockingStop {
+    type Msg = String;
+
+    fn post_stop(&mut self) {
+        self.0.0.send(()).unwrap();
+        self.0.1.lock().unwrap().recv().unwrap();
+    }
+
+    fn recv(&mut self, _: &Context<Self::Msg>, _: Self::Msg, _: Sender) {}
+}
+
+#[test]
+fn shutdown_stops_children_created_while_parent_terminates() {
+    let system = ActorSystem::new().unwrap();
+    let (stopping_tx, stopping) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel();
+    let gate = (
+        stopping_tx,
+        std::sync::Arc::new(std::sync::Mutex::new(release_rx)),
+    );
+    system
+        .actor_of_args::<BlockingStop, _>("blocking", gate)
+        .unwrap();
+    let shutdown = system.shutdown();
+    // `/user` is now terminating; it must also stop a child added after it stopped the others.
+    stopping.recv_timeout(Duration::from_secs(5)).unwrap();
+    system.actor_of::<StringActor>("late").unwrap();
+    release.send(()).unwrap();
+
+    let (done_tx, done) = mpsc::channel();
+    std::thread::spawn(move || done_tx.send(futures::executor::block_on(shutdown)));
+    assert!(
+        done.recv_timeout(Duration::from_secs(5)).unwrap().is_ok(),
+        "Shutdown did not complete"
+    );
+}

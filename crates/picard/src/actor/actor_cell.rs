@@ -155,8 +155,11 @@ impl ActorCell {
         actor.send_system_message(SystemCmd::Stop.into());
     }
 
-    pub fn add_child(&self, actor: BasicActorRef) {
-        self.inner.children.add(actor);
+    /// Adds a child and returns whether this actor is already terminating, in which case
+    /// the caller must stop the child once it is initialized.
+    #[must_use]
+    pub fn add_child(&self, actor: BasicActorRef) -> bool {
+        self.inner.children.add(actor)
     }
 
     pub fn remove_child(&self, actor: &BasicActorRef) {
@@ -177,13 +180,15 @@ impl ActorCell {
 
         self.inner.is_terminating.store(true, Ordering::Relaxed);
 
-        if self.has_children() {
-            for child in self.inner.children.iter() {
-                Self::stop(&child);
-            }
-        } else {
+        // Children added after this snapshot are stopped by their creator (see `add_child`).
+        let children = self.inner.children.terminate();
+        if children.is_empty() {
             self.kernel().terminate();
             post_stop(actor);
+        } else {
+            for child in children {
+                Self::stop(&child);
+            }
         }
     }
 
@@ -695,7 +700,13 @@ where
 /// added, unlike a sharded map, which allocates all of its shards for every actor.
 #[derive(Default)]
 pub struct Children {
-    actors: Mutex<HashMap<String, BasicActorRef>>,
+    actors: Mutex<ChildMap>,
+}
+
+#[derive(Default)]
+struct ChildMap {
+    actors: HashMap<String, BasicActorRef>,
+    terminating: bool,
 }
 
 impl Children {
@@ -703,29 +714,41 @@ impl Children {
         Self::default()
     }
 
-    fn lock(&self) -> MutexGuard<'_, HashMap<String, BasicActorRef>> {
+    fn lock(&self) -> MutexGuard<'_, ChildMap> {
         self.actors.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub fn add(&self, actor: BasicActorRef) {
-        self.lock().insert(actor.name().to_string(), actor);
+    /// Adds a child and returns whether the parent was already terminating.
+    pub fn add(&self, actor: BasicActorRef) -> bool {
+        let mut children = self.lock();
+        children.actors.insert(actor.name().to_string(), actor);
+        children.terminating
     }
 
     pub fn remove(&self, actor: &BasicActorRef) {
-        self.lock().remove(actor.name());
+        self.lock().actors.remove(actor.name());
     }
 
     pub fn len(&self) -> usize {
-        self.lock().len()
+        self.lock().actors.len()
     }
 
     pub fn contains(&self, actor: &BasicActorRef) -> bool {
-        self.lock().values().any(|child| child == actor)
+        self.lock().actors.values().any(|child| child == actor)
+    }
+
+    /// Marks the parent as terminating and returns the children to stop. Taken under the
+    /// same lock as `add`, so each child is stopped either here or by its creator.
+    fn terminate(&self) -> Vec<BasicActorRef> {
+        let mut children = self.lock();
+        children.terminating = true;
+        children.actors.values().cloned().collect()
     }
 
     /// Returns a snapshot, so the lock is not held while the caller messages the children.
     pub fn iter(&self) -> std::vec::IntoIter<BasicActorRef> {
         self.lock()
+            .actors
             .values()
             .cloned()
             .collect::<Vec<_>>()

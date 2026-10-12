@@ -219,9 +219,11 @@ fn console_route_rejects_invalid_configuration() {
             "requires the web server",
         ),
     ] {
+        // Default vehicles keep the simulation busy, so startup errors also exercise shutdown
+        // while actors are still being created.
         let mut command = Command::new(env!("CARGO_BIN_EXE_living-city"));
         command
-            .args(["--port", "0", "--vehicles", "0"])
+            .args(["--port", "0"])
             .args(arguments)
             .env_remove("PICARD_CONSOLE_TOKEN");
         if let Some(token) = token {
