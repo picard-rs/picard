@@ -264,10 +264,13 @@ impl Registry {
     }
 
     fn forward(&self, peer: &str, command: Command) -> Result<Value, ConsoleError> {
-        if matches!(command, Command::Forward { .. } | Command::Send { .. }) {
+        if matches!(
+            command,
+            Command::Forward { .. } | Command::Send { peer: Some(_), .. }
+        ) {
             return Err(ConsoleError::new(
                 "invalid_request",
-                "Only inspection and management commands can be forwarded; use send with a peer",
+                "A forwarded command cannot target another peer",
             ));
         }
         let query = self

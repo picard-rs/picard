@@ -21,7 +21,7 @@ use rustyline::{
 
 use crate::{
     client::Client,
-    command::{HELP, Input, complete, parse},
+    command::{HELP, Input, complete, is_send, parse},
 };
 
 const REPL_KEYS: &str = "\
@@ -172,7 +172,9 @@ fn interact(
                 continue;
             }
         };
-        if !matches!(input, Input::Command(Command::Send { .. }) | Input::Empty) {
+        if !matches!(&input, Input::Command(command) if is_send(command))
+            && !matches!(input, Input::Empty)
+        {
             editor.add_history_entry(line.as_str())?;
         }
         match input {

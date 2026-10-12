@@ -704,7 +704,7 @@ fn forward_runs_commands_on_a_registered_peer_console() {
             "not_found",
         ),
         (
-            json!({ "op": "send", "path": "/user/x", "message": 1 }),
+            json!({ "op": "send", "peer": "other", "path": "/user/x", "message": 1 }),
             "invalid_request",
         ),
         (

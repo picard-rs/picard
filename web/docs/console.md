@@ -109,6 +109,10 @@ The TUI shows the actor tree with queue lengths and mailbox state, the selected
 actor's details, and its recent message events (newest first). It refreshes
 every second. The tree starts collapsed below the root; filtering shows all matches.
 
+Registered peers appear as collapsed `@peer` nodes. Expanding one fetches that peer's actors
+through the connected actor; they behave like local rows (details, messages, pause, clear,
+restart, stop, and `s`, which prefills `@peer send PATH `). The peer's root `/` is hidden.
+
 ```text
 Up/Down, j/k   Select an actor (PgUp/PgDn, Home/End jump)
 Right/l, Left/h  Expand / collapse the actor's children (Left on a leaf selects its parent)
@@ -249,7 +253,8 @@ registers the peer with `ActorSystem::register_console_peer_query(name, query)`,
 `Console::handle_text` there. Forwarded requests cannot be forwarded again, and the remote
 console applies its own rules (for example, runtime actors stay protected). The wire form is
 `{"op":"forward","peer":"district-1","command":{"op":"inspect","path":"/user/x"}}`.
-Remote `actors` returns the first page only. Whoever holds a peer's shared token can use
+A forwarded `actors` returns one page (the client paginates). A forwarded `send` runs on the
+remote console with its own typed decoder. Whoever holds a peer's shared token can use
 this path, so it grants the same trust as sending messages to that peer.
 
 ## Typed JSON sends

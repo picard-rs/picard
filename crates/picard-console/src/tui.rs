@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use crate::{
     client::Client,
-    command::{HELP, Input, complete, parse},
+    command::{HELP, Input, complete, is_send, parse},
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
@@ -111,8 +111,14 @@ struct ActorRow {
     manageable: bool,
     json_send: bool,
     mailbox: MailboxState,
+    /// The remote peer that owns the actor; `path` is then `@peer` followed by `remote_path`.
+    peer: Option<String>,
+    remote_path: String,
+    /// A peer's top-level entry, whose children are fetched when it is expanded.
+    node: bool,
 }
 
+#[derive(Default)]
 struct MailboxState {
     user_messages: u64,
     system_messages: u64,
@@ -124,8 +130,12 @@ struct MailboxState {
 impl ActorRow {
     fn from_value(value: &Value) -> Option<Self> {
         let mailbox = &value["mailbox"];
+        let path = value["path"].as_str()?.to_owned();
         Some(Self {
-            path: value["path"].as_str()?.to_owned(),
+            remote_path: path.clone(),
+            peer: None,
+            node: false,
+            path,
             parent: value["parent"].as_str().unwrap_or_default().to_owned(),
             message_type: value["message_type"]
                 .as_str()
@@ -141,6 +151,42 @@ impl ActorRow {
                 scheduled: mailbox["scheduled"].as_bool().unwrap_or(false),
             },
         })
+    }
+
+    /// Re-roots an actor reported by `peer` under that peer's node; the remote root is dropped.
+    fn on_peer(mut self, peer: &str) -> Option<Self> {
+        if self.remote_path == "/" {
+            return None;
+        }
+        self.path = format!("@{peer}{}", self.remote_path);
+        self.peer = Some(peer.to_owned());
+        Some(self)
+    }
+
+    fn peer_node(peer: &str) -> Self {
+        Self {
+            path: format!("@{peer}"),
+            parent: String::new(),
+            message_type: String::new(),
+            manageable: false,
+            json_send: false,
+            mailbox: MailboxState::default(),
+            peer: Some(peer.to_owned()),
+            remote_path: String::new(),
+            node: true,
+        }
+    }
+
+    /// Builds a command for this actor, forwarded to its peer when it is remote.
+    fn command(&self, make: impl FnOnce(String) -> Command) -> Command {
+        let command = make(self.remote_path.clone());
+        match &self.peer {
+            Some(peer) => Command::Forward {
+                peer: peer.clone(),
+                command: Box::new(command),
+            },
+            None => command,
+        }
     }
 
     fn state(&self, theme: Theme) -> Span<'static> {
@@ -160,7 +206,12 @@ impl ActorRow {
 
     /// Indented last path segment, so the sorted list reads as a tree.
     fn tree_label(&self, marker: &str) -> String {
-        let depth = self.path.matches('/').count().saturating_sub(1);
+        let nesting = self.path.matches('/').count().saturating_sub(1);
+        let depth = if self.peer.is_some() && !self.node {
+            nesting + 1
+        } else {
+            nesting
+        };
         let name = self.path.rsplit('/').next().filter(|name| !name.is_empty());
         format!("{}{marker}{}", "  ".repeat(depth), name.unwrap_or("/"))
     }
@@ -345,9 +396,9 @@ impl App {
     }
 
     fn has_children(&self, path: &str) -> bool {
-        self.actors
-            .iter()
-            .any(|actor| parent_path(&actor.path) == Some(path))
+        self.actors.iter().any(|actor| {
+            parent_path(&actor.path) == Some(path) || (actor.node && actor.path == path)
+        })
     }
 
     /// Expands the selected actor, or moves to its first child when already expanded.
@@ -358,7 +409,10 @@ impl App {
         if !self.filter.text.is_empty() || !self.has_children(&path) {
             return;
         }
-        if self.expanded.insert(path) {
+        if self.expanded.insert(path.clone()) {
+            if self.selected_row().is_some_and(|row| row.node) {
+                self.refresh_soon();
+            }
             return;
         }
         let index = self.table.selected().unwrap_or(0) + 1;
@@ -390,7 +444,11 @@ impl App {
     }
 
     fn paths(&self) -> Vec<String> {
-        self.actors.iter().map(|actor| actor.path.clone()).collect()
+        self.actors
+            .iter()
+            .filter(|actor| actor.peer.is_none())
+            .map(|actor| actor.path.clone())
+            .collect()
     }
 
     /// Keeps the selection on the same actor, or the same row if the actor disappeared.
@@ -414,7 +472,11 @@ impl App {
 
     fn selection_changed(&mut self) {
         self.messages.clear();
-        // Fetch the new actor's history on the next loop iteration.
+        self.refresh_soon();
+    }
+
+    /// Fetches fresh data on the next loop iteration.
+    fn refresh_soon(&mut self) {
         self.last_refresh = Instant::now()
             .checked_sub(REFRESH)
             .unwrap_or(self.last_refresh);
@@ -468,10 +530,30 @@ impl App {
             .iter()
             .filter_map(ActorRow::from_value)
             .collect();
+        for peer in client.peers() {
+            let node = format!("@{peer}");
+            self.actors.push(ActorRow::peer_node(&peer));
+            if !self.expanded.contains(&node) {
+                continue;
+            }
+            match client.peer_actors(&peer) {
+                Ok(actors) => self.actors.extend(
+                    actors
+                        .iter()
+                        .filter_map(ActorRow::from_value)
+                        .filter_map(|actor| actor.on_peer(&peer)),
+                ),
+                Err(err) => self.set_status(Severity::Error, format!("{peer}: {err}")),
+            }
+        }
         self.reselect();
-        self.messages = match self.selected.clone() {
-            Some(path) => {
-                let response = client.execute(Command::Messages { path })?;
+        let history = self
+            .selected_row()
+            .filter(|row| !row.node)
+            .map(|row| row.command(|path| Command::Messages { path }));
+        self.messages = match history {
+            Some(command) => {
+                let response = client.execute(command)?;
                 response
                     .result
                     .and_then(|result| result["events"].as_array().cloned())
@@ -485,10 +567,11 @@ impl App {
 
     fn execute(&mut self, client: &mut Client, command: Command) -> Result<(), Box<dyn Error>> {
         let request = serde_json::to_value(&command)?;
+        let inner = request.get("command").unwrap_or(&request);
         let label = format!(
             "{} {}",
-            request["op"].as_str().unwrap_or_default(),
-            request["path"].as_str().unwrap_or_default()
+            inner["op"].as_str().unwrap_or_default(),
+            inner["path"].as_str().unwrap_or_default()
         );
         let response = client.execute(command)?;
         match (response.result, response.error) {
@@ -569,18 +652,40 @@ impl App {
                     self.set_status(Severity::Error, "No actor selected");
                     return Ok(());
                 };
-                let path = actor.path.clone();
+                if actor.node {
+                    self.set_status(
+                        Severity::Error,
+                        "Expand the peer and select one of its actors",
+                    );
+                    return Ok(());
+                }
+                let paused = actor.mailbox.paused;
+                let send_prefix = match &actor.peer {
+                    Some(peer) => format!("@{peer} send {} ", actor.remote_path),
+                    None => format!("send {} ", actor.path),
+                };
                 match action {
-                    'p' if actor.mailbox.paused => {
-                        self.execute(client, Command::Resume { path })?;
+                    'p' if paused => {
+                        let command = actor.command(|path| Command::Resume { path });
+                        self.execute(client, command)?;
                     }
-                    'p' => self.execute(client, Command::Pause { path })?,
-                    's' => {
-                        self.mode = Mode::Command(LineEdit::with_text(format!("send {path} ")));
+                    'p' => {
+                        let command = actor.command(|path| Command::Pause { path });
+                        self.execute(client, command)?;
                     }
-                    'c' => self.confirm(Command::Clear { path }),
-                    'r' => self.confirm(Command::Restart { path }),
-                    _ => self.confirm(Command::Stop { path }),
+                    's' => self.mode = Mode::Command(LineEdit::with_text(send_prefix)),
+                    'c' => {
+                        let command = actor.command(|path| Command::Clear { path });
+                        self.confirm(command);
+                    }
+                    'r' => {
+                        let command = actor.command(|path| Command::Restart { path });
+                        self.confirm(command);
+                    }
+                    _ => {
+                        let command = actor.command(|path| Command::Stop { path });
+                        self.confirm(command);
+                    }
                 }
             }
             _ => {}
@@ -650,7 +755,8 @@ impl App {
             }
         };
         // Message payloads may be sensitive, so sends are not kept in history.
-        if !matches!(input, Input::Empty | Input::Command(Command::Send { .. }))
+        if !matches!(&input, Input::Command(command) if is_send(command))
+            && !matches!(input, Input::Empty)
             && self.history.last().is_none_or(|last| last != line.trim())
         {
             self.history.push(line.trim().to_owned());
@@ -892,11 +998,15 @@ impl App {
         let theme = self.theme;
         let line = if let Mode::Confirm(command) = &self.mode {
             let request = serde_json::to_value(command).unwrap_or_default();
+            let inner = request.get("command").unwrap_or(&request);
+            let peer = request["peer"]
+                .as_str()
+                .map_or_else(String::new, |peer| format!("@{peer}"));
             Line::styled(
                 format!(
-                    " {} {}? Press y to confirm, any other key cancels.",
-                    request["op"].as_str().unwrap_or_default(),
-                    request["path"].as_str().unwrap_or_default()
+                    " {} {peer}{}? Press y to confirm, any other key cancels.",
+                    inner["op"].as_str().unwrap_or_default(),
+                    inner["path"].as_str().unwrap_or_default()
                 ),
                 theme.fg(Color::Yellow).add_modifier(Modifier::BOLD),
             )
@@ -1129,5 +1239,62 @@ mod tests {
         client.close().unwrap();
         server.stop().unwrap();
         futures::executor::block_on(sys.shutdown()).unwrap();
+    }
+
+    #[test]
+    fn shows_and_manages_the_actors_of_a_remote_peer() {
+        let local = ActorSystem::new().unwrap();
+        let remote = ActorSystem::new().unwrap();
+        let (tx, rx) = mpsc::channel();
+        remote.actor_of_args::<Worker, _>("far", tx).unwrap();
+        let remote_console = remote.console();
+        local.register_console_peer_query(
+            "other",
+            std::sync::Arc::new(move |request| Ok(remote_console.handle_text(request))),
+        );
+        let server = local
+            .start_console(ConsoleOptions {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                token: TOKEN.into(),
+            })
+            .unwrap();
+        let url = format!("ws://{}/console", server.local_addr());
+        let mut client = Client::connect(&url, TOKEN).unwrap();
+        let mut app = App::new(&url, false);
+        app.refresh(&mut client).unwrap();
+        let text = screen(&mut app);
+        assert!(text.contains("@other") && !text.contains("far"), "{text}");
+
+        app.select_path("@other");
+        app.on_key(key(KeyCode::Right), &mut client).unwrap();
+        app.refresh(&mut client).unwrap();
+        app.select_path("@other/user");
+        app.on_key(key(KeyCode::Right), &mut client).unwrap();
+        assert!(screen(&mut app).contains("far"));
+        app.select_path("@other/user/far");
+
+        app.on_key(key(KeyCode::Char('p')), &mut client).unwrap();
+        assert!(app.selected_row().unwrap().mailbox.paused);
+        let paused = remote
+            .console()
+            .handle_text(r#"{"id":1,"op":"inspect","path":"/user/far"}"#);
+        assert!(paused.contains(r#""paused":true"#), "{paused}");
+        app.on_key(key(KeyCode::Char('p')), &mut client).unwrap();
+        assert!(!app.selected_row().unwrap().mailbox.paused);
+
+        app.on_key(key(KeyCode::Char('x')), &mut client).unwrap();
+        assert!(screen(&mut app).contains("stop @other/user/far?"));
+        app.on_key(key(KeyCode::Char('n')), &mut client).unwrap();
+        app.on_key(key(KeyCode::Char('s')), &mut client).unwrap();
+        let Mode::Command(edit) = &app.mode else {
+            panic!("Expected the command bar")
+        };
+        assert_eq!(edit.text, "@other send /user/far ");
+        drop(rx);
+
+        client.close().unwrap();
+        server.stop().unwrap();
+        futures::executor::block_on(local.shutdown()).unwrap();
+        futures::executor::block_on(remote.shutdown()).unwrap();
     }
 }

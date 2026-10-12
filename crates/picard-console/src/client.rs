@@ -64,10 +64,34 @@ impl Client {
     }
 
     pub(crate) fn actors(&mut self) -> Result<Vec<Value>, Box<dyn Error>> {
+        self.list_actors(None)
+    }
+
+    /// The names of the remote peers whose consoles can be reached through this one.
+    pub(crate) fn peers(&mut self) -> Vec<String> {
+        self.execute(Command::Peers)
+            .ok()
+            .and_then(|response| response.result)
+            .and_then(|result| serde_json::from_value(result["peers"].clone()).ok())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn peer_actors(&mut self, peer: &str) -> Result<Vec<Value>, Box<dyn Error>> {
+        self.list_actors(Some(peer))
+    }
+
+    fn list_actors(&mut self, peer: Option<&str>) -> Result<Vec<Value>, Box<dyn Error>> {
         let mut actors = Vec::new();
         let mut offset = 0;
         loop {
-            let response = self.execute(Command::Actors { offset, limit: 100 })?;
+            let mut command = Command::Actors { offset, limit: 100 };
+            if let Some(peer) = peer {
+                command = Command::Forward {
+                    peer: peer.to_owned(),
+                    command: Box::new(command),
+                };
+            }
+            let response = self.execute(command)?;
             if let Some(error) = response.error {
                 return Err(format!("{}: {}", error.code, error.message).into());
             }
