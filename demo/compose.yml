@@ -6,6 +6,8 @@ services:
     command: ["--district", "0", "--web-ui", "--host", "0.0.0.0", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     ports:
       - "${LIVING_CITY_PORT:-8080}:8080"
     expose: ["9100"]
@@ -27,6 +29,8 @@ services:
     command: ["--district", "1", "--connect", "0=ws://district-0:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
 
@@ -37,6 +41,8 @@ services:
     command: ["--district", "2", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
 
@@ -47,6 +53,8 @@ services:
     command: ["--district", "3", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
 
@@ -57,6 +65,8 @@ services:
     command: ["--district", "4", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
 
@@ -67,6 +77,8 @@ services:
     command: ["--district", "5", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
 
@@ -77,6 +89,8 @@ services:
     command: ["--district", "6", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "7=ws://district-7:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
 
@@ -87,6 +101,8 @@ services:
     command: ["--district", "7", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "8=ws://district-8:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
 
@@ -97,5 +113,7 @@ services:
     command: ["--district", "8", "--connect", "0=ws://district-0:9100/remoting", "--connect", "1=ws://district-1:9100/remoting", "--connect", "2=ws://district-2:9100/remoting", "--connect", "3=ws://district-3:9100/remoting", "--connect", "4=ws://district-4:9100/remoting", "--connect", "5=ws://district-5:9100/remoting", "--connect", "6=ws://district-6:9100/remoting", "--connect", "7=ws://district-7:9100/remoting"]
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
+      PICARD_CONSOLE_LISTEN: 127.0.0.1:9000
+      PICARD_CONSOLE_TOKEN: ${LIVING_CITY_CONSOLE_TOKEN:?Set a strong LIVING_CITY_CONSOLE_TOKEN}
     expose: ["9100"]
     restart: unless-stopped
