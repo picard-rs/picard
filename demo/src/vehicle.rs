@@ -18,7 +18,7 @@ use crate::{
     metrics::Metrics,
     msg::{
         Directory, DistrictMsg, Fault, GatewayMsg, InspectReq, JunctionMsg, Tick, VehicleId,
-        VehicleMsg, VehicleView, crash, state,
+        VehicleMsg, VehicleTransfer, VehicleView, crash, state,
     },
     trace::Trace,
 };
@@ -27,6 +27,22 @@ const CROSS_TIME: f32 = 0.6;
 const RETRY_AFTER: f32 = 1.5;
 const MAX_UNANSWERED: u32 = 2;
 const BLOCK_FOR: f32 = 30.0;
+
+/// Actor name of a vehicle: `v-<id>` at first, `v-<id>h<hop>` after hand-overs.
+#[must_use]
+pub fn actor_name(id: VehicleId, hop: u32) -> String {
+    if hop == 0 {
+        format!("v-{id}")
+    } else {
+        format!("v-{id}h{hop}")
+    }
+}
+
+#[must_use]
+pub fn parse_actor_name(name: &str) -> Option<VehicleId> {
+    let rest = name.strip_prefix("v-")?;
+    rest.split_once('h').map_or(rest, |(id, _)| id).parse().ok()
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct VehicleSeed {
@@ -41,6 +57,9 @@ pub struct VehicleSeed {
 pub struct VehicleArgs {
     pub seed: VehicleSeed,
     pub district: ActorRef<DistrictMsg>,
+    pub gateway: ActorRef<GatewayMsg>,
+    /// Set when the vehicle was handed over by a district of another process.
+    pub arrival: Option<VehicleTransfer>,
     pub metrics: Arc<Metrics>,
 }
 
@@ -66,13 +85,15 @@ pub struct Vehicle {
     request_age: f32,
     unanswered: u32,
     trips: u32,
+    hop: u32,
     trace: Trace,
 }
 
 impl ActorFactoryArgs<VehicleArgs> for Vehicle {
     fn create_args(args: VehicleArgs) -> Self {
         let spawn = args.seed.spawn;
-        Self {
+        let arrival = args.arrival.clone();
+        let mut vehicle = Self {
             dest: args.seed.hotspot.unwrap_or(spawn),
             args,
             dir: Arc::default(),
@@ -86,8 +107,20 @@ impl ActorFactoryArgs<VehicleArgs> for Vehicle {
             request_age: 0.0,
             unanswered: 0,
             trips: 0,
+            hop: 0,
             trace: Trace::default(),
+        };
+        if let Some(transfer) = arrival {
+            vehicle.from = transfer.from;
+            vehicle.to = transfer.to;
+            vehicle.dest = transfer.dest;
+            vehicle.route = transfer.route;
+            vehicle.trips = transfer.trips;
+            vehicle.hop = transfer.hop;
+            vehicle.s = 0.0;
+            vehicle.mode = Mode::Driving;
         }
+        vehicle
     }
 }
 
@@ -97,7 +130,7 @@ impl Vehicle {
     }
 
     fn passable(&self, node: Node) -> bool {
-        self.dir.junctions.contains_key(&node)
+        self.dir.has(node)
             && self
                 .blocked
                 .get(&node)
@@ -110,14 +143,14 @@ impl Vehicle {
                 rng.random_range(0..GRID_NODES),
                 rng.random_range(0..GRID_NODES),
             );
-            if node != avoid && self.dir.junctions.contains_key(&node) {
+            if node != avoid && self.dir.has(node) {
                 return Some(node);
             }
         }
         None
     }
 
-    fn plan_trip(&mut self) {
+    fn plan_trip(&mut self, ctx: &Context<VehicleMsg>) {
         let mut rng = rand::rng();
         let at = self.to;
         let hotspot = self
@@ -137,6 +170,7 @@ impl Vehicle {
                 self.route = route;
                 self.s = 0.0;
                 self.mode = Mode::Driving;
+                self.hand_over_if_remote(ctx);
             }
             _ => self.mode = Mode::Parked { left: 1.0 },
         }
@@ -156,7 +190,7 @@ impl Vehicle {
 
     fn request_entry(&mut self, ctx: &Context<VehicleMsg>) {
         let Some(junction) = self.dir.junctions.get(&self.to).cloned() else {
-            self.u_turn();
+            self.u_turn(ctx);
             return;
         };
         let id = self.args.seed.id;
@@ -180,7 +214,7 @@ impl Vehicle {
     }
 
     /// The junction ahead cannot be reached: remember that and drive back to plan another way.
-    fn u_turn(&mut self) {
+    fn u_turn(&mut self, ctx: &Context<VehicleMsg>) {
         self.args.metrics.inc(&self.args.metrics.reroutes);
         self.blocked.insert(self.to, self.clock + BLOCK_FOR);
         if self.from == self.to {
@@ -200,19 +234,44 @@ impl Vehicle {
         self.s = 0.0;
         self.unanswered = 0;
         self.mode = Mode::Driving;
+        self.hand_over_if_remote(ctx);
     }
 
-    fn replan_after_directory_change(&mut self) {
+    /// Drives into a district of another process: the vehicle leaves this actor system and
+    /// continues as a new actor in the remote district, carrying its route and statistics.
+    fn hand_over_if_remote(&mut self, ctx: &Context<VehicleMsg>) {
+        if !self.dir.is_remote(self.to) {
+            return;
+        }
+        let transfer = VehicleTransfer {
+            id: self.args.seed.id,
+            hop: self.hop + 1,
+            from: self.from,
+            to: self.to,
+            dest: self.dest,
+            route: std::mem::take(&mut self.route),
+            speed: self.args.seed.speed,
+            trips: self.trips,
+        };
+        self.args.gateway.tell(
+            GatewayMsg::Migrate {
+                district: self.to.district(),
+                transfer,
+            },
+            None,
+        );
+        self.args.metrics.inc(&self.args.metrics.sent);
+        self.mode = Mode::Parked { left: f32::MAX };
+        ctx.stop(ctx.myself());
+    }
+
+    fn replan_after_directory_change(&mut self, ctx: &Context<VehicleMsg>) {
         if matches!(self.mode, Mode::Parked { .. }) {
             return;
         }
-        if !self.dir.junctions.contains_key(&self.to) {
-            self.u_turn();
-        } else if self
-            .route
-            .iter()
-            .any(|n| !self.dir.junctions.contains_key(n))
-        {
+        if !self.dir.has(self.to) {
+            self.u_turn(ctx);
+        } else if self.route.iter().any(|n| !self.dir.has(*n)) {
             let mut rng = rand::rng();
             self.route = plan_route(self.to, self.dest, |n| self.passable(n), &mut rng)
                 .unwrap_or_else(|| {
@@ -222,7 +281,7 @@ impl Vehicle {
         }
     }
 
-    fn finish_crossing(&mut self) {
+    fn finish_crossing(&mut self, ctx: &Context<VehicleMsg>) {
         if let Some(junction) = self.dir.junctions.get(&self.to) {
             junction.tell(
                 JunctionMsg::VehicleExitedIntersection {
@@ -241,6 +300,7 @@ impl Vehicle {
                 self.to = next;
                 self.s = 0.0;
                 self.mode = Mode::Driving;
+                self.hand_over_if_remote(ctx);
             }
             None => self.mode = Mode::Parked { left: 0.0 },
         }
@@ -276,9 +336,11 @@ impl Vehicle {
                 let left = left - dt;
                 self.mode = Mode::Parked { left };
                 if left <= 0.0 {
-                    self.plan_trip();
+                    self.plan_trip(ctx);
                 }
             }
+            // A handed-over vehicle waits for its address book before reaching a junction.
+            Mode::Driving if self.dir.version == 0 => {}
             Mode::Driving => {
                 self.s += self.args.seed.speed * dt;
                 if self.s >= 1.0 {
@@ -292,7 +354,7 @@ impl Vehicle {
                     self.unanswered += 1;
                     self.args.metrics.inc(&self.args.metrics.retries);
                     if self.unanswered > MAX_UNANSWERED {
-                        self.u_turn();
+                        self.u_turn(ctx);
                     } else {
                         self.request_entry(ctx);
                     }
@@ -301,7 +363,7 @@ impl Vehicle {
             Mode::Crossing { left } => {
                 let left = left - dt;
                 if left <= 0.0 {
-                    self.finish_crossing();
+                    self.finish_crossing(ctx);
                 } else {
                     self.mode = Mode::Crossing { left };
                 }
@@ -413,7 +475,7 @@ impl Actor for Vehicle {
             }
             VehicleMsg::Directory(dir) => {
                 self.dir = dir;
-                self.replan_after_directory_change();
+                self.replan_after_directory_change(ctx);
             }
             VehicleMsg::Fault(Fault::Crash) => crash(ctx, &self.name()),
             VehicleMsg::Fault(Fault::Terminate) => ctx.stop(ctx.myself()),

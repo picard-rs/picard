@@ -96,3 +96,59 @@ async fn remote_district_snapshots_reach_the_ui_gateway() {
     first.system.shutdown().await.unwrap();
     second.system.shutdown().await.unwrap();
 }
+
+fn visitors_from(frame: &living_city::gateway::Frame, home: u64, host: usize) -> usize {
+    frame
+        .districts
+        .iter()
+        .filter(|snapshot| snapshot.district == host)
+        .flat_map(|snapshot| &snapshot.vehicles)
+        .filter(|vehicle| (vehicle.id >> 32) & 0xff == home)
+        .count()
+}
+
+#[tokio::test]
+async fn vehicles_drive_between_districts_of_different_processes() {
+    let address_zero = available_address();
+    let address_one = available_address();
+    let peers_zero = vec![PeerSpec {
+        district: 1,
+        endpoint: format!("ws://{address_one}/remoting"),
+    }];
+    let peers_one = vec![PeerSpec {
+        district: 0,
+        endpoint: format!("ws://{address_zero}/remoting"),
+    }];
+    let first = thread::spawn(move || {
+        Sim::start_remote(
+            200,
+            0,
+            address_zero,
+            "test-shared-token".into(),
+            &peers_zero,
+        )
+    });
+    let second = thread::spawn(move || {
+        Sim::start_remote(200, 1, address_one, "test-shared-token".into(), &peers_one)
+    });
+    let first = first.join().unwrap().unwrap();
+    let second = second.join().unwrap().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let (mut into_zero, mut into_one) = (0, 0);
+    while into_zero == 0 || into_one == 0 {
+        {
+            let frame = first.frames.borrow();
+            into_zero = into_zero.max(visitors_from(&frame, 1, 0));
+            into_one = into_one.max(visitors_from(&frame, 0, 1));
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no vehicle crossed the process boundary: into 0 = {into_zero}, into 1 = {into_one}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    first.system.shutdown().await.unwrap();
+    second.system.shutdown().await.unwrap();
+}

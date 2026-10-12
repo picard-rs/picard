@@ -19,9 +19,9 @@ use crate::{
     metrics::Metrics,
     msg::{
         Directory, DistrictMsg, DistrictSnapshot, Fault, GatewayMsg, JunctionMsg, JunctionView,
-        SupervisorMsg, Tick, VehicleId, VehicleMsg, VehicleView,
+        SupervisorMsg, Tick, VehicleId, VehicleMsg, VehicleTransfer, VehicleView,
     },
-    vehicle::{Vehicle, VehicleArgs, VehicleSeed},
+    vehicle::{Vehicle, VehicleArgs, VehicleSeed, actor_name, parse_actor_name},
 };
 
 const SPAWN_BATCH: usize = 250;
@@ -89,9 +89,11 @@ impl District {
             let args = VehicleArgs {
                 seed,
                 district: ctx.myself(),
+                gateway: self.args.gateway.clone(),
+                arrival: None,
                 metrics: self.args.metrics.clone(),
             };
-            if let Ok(vehicle) = ctx.actor_of_args::<Vehicle, _>(&format!("v-{id}"), args) {
+            if let Ok(vehicle) = ctx.actor_of_args::<Vehicle, _>(&actor_name(id, 0), args) {
                 self.args.metrics.inc(&self.args.metrics.created);
                 self.vehicles.insert(id, vehicle);
             }
@@ -100,6 +102,30 @@ impl District {
         if self.to_spawn > 0 {
             // Yield to the mailbox between batches so ticks and inspector requests keep flowing.
             ctx.myself().tell(DistrictMsg::SpawnBatch, None);
+        }
+    }
+
+    fn accept_arrival(&mut self, ctx: &Context<DistrictMsg>, transfer: VehicleTransfer) {
+        let id = transfer.id;
+        if self.vehicles.contains_key(&id) {
+            return;
+        }
+        let args = VehicleArgs {
+            seed: VehicleSeed {
+                id,
+                spawn: transfer.to,
+                hotspot: None,
+                speed: transfer.speed,
+            },
+            district: ctx.myself(),
+            gateway: self.args.gateway.clone(),
+            metrics: self.args.metrics.clone(),
+            arrival: Some(transfer.clone()),
+        };
+        let name = actor_name(id, transfer.hop);
+        if let Ok(vehicle) = ctx.actor_of_args::<Vehicle, _>(&name, args) {
+            self.args.metrics.inc(&self.args.metrics.created);
+            self.vehicles.insert(id, vehicle);
         }
     }
 
@@ -248,12 +274,16 @@ impl Actor for District {
             return;
         };
         let name = t.actor.name();
-        if let Some(id) = name
-            .strip_prefix("v-")
-            .and_then(|n| n.parse::<VehicleId>().ok())
-        {
-            self.vehicles.remove(&id);
-            self.vehicle_views.remove(&id);
+        if let Some(id) = parse_actor_name(name) {
+            // A handed-over vehicle may already have a successor with the same id.
+            if self
+                .vehicles
+                .get(&id)
+                .is_some_and(|v| v.path() == t.actor.path())
+            {
+                self.vehicles.remove(&id);
+                self.vehicle_views.remove(&id);
+            }
         } else if let Some(('i', node)) = Node::parse(name)
             && self
                 .junctions
@@ -285,6 +315,7 @@ impl Actor for District {
                     self.args.metrics.inc(&self.args.metrics.sent);
                 }
             }
+            DistrictMsg::VehicleArrival(transfer) => self.accept_arrival(ctx, transfer),
             DistrictMsg::SetTarget(n) => self.set_target(ctx, n),
             DistrictMsg::Surge(n) => {
                 self.target += n;

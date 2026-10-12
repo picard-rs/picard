@@ -1,6 +1,10 @@
 //! Simulation supervisor: owns the districts, the clock and the simulation lifecycle.
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use picard::actors::{
     Actor, ActorFactoryArgs, ActorRef, ActorRefFactory, Context, Sender, Tell, Timer,
@@ -30,6 +34,7 @@ pub struct Supervisor {
     args: SupervisorArgs,
     districts: BTreeMap<usize, ActorRef<DistrictMsg>>,
     junctions: std::collections::HashMap<Node, ActorRef<JunctionMsg>>,
+    remote: BTreeSet<usize>,
     version: u64,
     generation: u64,
     per_district: usize,
@@ -48,6 +53,7 @@ impl ActorFactoryArgs<SupervisorArgs> for Supervisor {
             args,
             districts: BTreeMap::new(),
             junctions: std::collections::HashMap::new(),
+            remote: BTreeSet::new(),
             version: 0,
             generation: 0,
             paused: false,
@@ -112,6 +118,7 @@ impl Supervisor {
         let dir = Arc::new(Directory {
             version: self.version,
             junctions: self.junctions.clone(),
+            remote: self.remote.iter().copied().collect(),
         });
         for district in self.districts.values() {
             district.tell(DistrictMsg::Directory(dir.clone()), None);
@@ -225,6 +232,23 @@ impl Actor for Supervisor {
                     self.junctions.extend(junctions);
                     self.publish_directory();
                     actor.tell(DistrictMsg::SetTarget(self.per_district), None);
+                }
+            }
+            SupervisorMsg::RemoteDistricts(districts) => {
+                let remote: BTreeSet<usize> = districts
+                    .into_iter()
+                    .filter(|d| *d < DISTRICT_COUNT && Some(*d) != self.args.district)
+                    .collect();
+                if remote != self.remote {
+                    self.remote = remote;
+                    self.publish_directory();
+                }
+            }
+            SupervisorMsg::VehicleArrival(transfer) => {
+                if transfer.is_valid()
+                    && let Some(district) = self.districts.get(&transfer.to.district())
+                {
+                    district.tell(DistrictMsg::VehicleArrival(transfer), None);
                 }
             }
             SupervisorMsg::Fault { id, fault } => self.broadcast(&DistrictMsg::Fault { id, fault }),
