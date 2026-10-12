@@ -22,7 +22,7 @@ Picard provides:
 - Out-of-the-box, configurable, non-blocking logging
 - Command Query Responsibility Segregation (CQRS)
 - Easily run futures
-- Optional authenticated WebSocket [runtime console](web/docs/console.md) with an interactive terminal REPL
+- Optional authenticated WebSocket [runtime console](web/docs/console.md) with an interactive terminal UI and REPL
 
 [Website](https://picard.rs) | [API Docs](https://docs.rs/picard)
 

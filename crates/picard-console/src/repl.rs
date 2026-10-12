@@ -1,13 +1,14 @@
+//! Line-oriented REPL, used with `--repl` or when the terminal is not interactive.
+
 use std::{
     borrow::Cow,
     env,
     error::Error,
     io::{self, IsTerminal},
     path::PathBuf,
-    time::Duration,
 };
 
-use picard::console::{Command, Request, Response};
+use picard::console::Command;
 use rustyline::{
     Context, Editor, Helper,
     completion::{Completer, Pair},
@@ -17,26 +18,13 @@ use rustyline::{
     history::DefaultHistory,
     validate::Validator,
 };
-use serde_json::Value;
-use tungstenite::{Message, WebSocket, client::IntoClientRequest, connect, stream::MaybeTlsStream};
 
-const COMMANDS: &[&str] = &[
-    "actors", "inspect", "messages", "pause", "resume", "clear", "stop", "restart", "send", "help",
-    "quit",
-];
-const HELP: &str = "\
-actors                  List actors and mailbox state
-inspect PATH            Inspect one actor
-messages PATH           Show the last 64 user-message events
-pause PATH              Pause user-message processing
-resume PATH             Resume user-message processing
-clear PATH              Discard queued user messages (requires pause)
-stop PATH               Request actor termination
-restart PATH            Request actor restart
-send PATH JSON          Send a typed JSON message (server requires serde)
-help                    Show this help
-quit                    Disconnect
+use crate::{
+    client::Client,
+    command::{HELP, Input, complete, parse},
+};
 
+const REPL_KEYS: &str = "\
 Tab completes commands and actor paths. Up/Down recall history.
 Ctrl-C cancels input; Ctrl-D disconnects. Sends are not saved to history.";
 
@@ -102,215 +90,14 @@ impl Completer for ConsoleHelper {
     }
 }
 
-fn complete(line: &str, pos: usize, paths: &[String]) -> (usize, Vec<String>) {
-    let prefix = &line[..pos];
-    let start = prefix
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| ch.is_whitespace())
-        .map_or(0, |(position, ch)| position + ch.len_utf8());
-    let word = &prefix[start..];
-    let before: Vec<_> = prefix[..start].split_whitespace().collect();
-    let candidates = if before.is_empty() {
-        COMMANDS
-            .iter()
-            .filter(|command| command.starts_with(word))
-            .map(|command| (*command).to_owned())
-            .collect()
-    } else if before.len() == 1 && COMMANDS[1..9].contains(&before[0]) {
-        paths
-            .iter()
-            .filter(|path| path.starts_with(word))
-            .cloned()
-            .collect()
-    } else {
-        Vec::new()
-    };
-    (start, candidates)
-}
-
-enum Input {
-    Command(Command),
-    Help,
-    Quit,
-    Empty,
-}
-
-fn parse(line: &str) -> Result<Input, String> {
-    let line = line.trim();
-    if line.is_empty() {
-        return Ok(Input::Empty);
-    }
-    let (name, rest) = line
-        .split_once(char::is_whitespace)
-        .map_or((line, ""), |(name, rest)| (name, rest.trim()));
-    if name == "send" {
-        let (path, json) = rest
-            .split_once(char::is_whitespace)
-            .ok_or("Usage: send PATH JSON")?;
-        let path = validate_path(path)?;
-        let message =
-            serde_json::from_str(json.trim()).map_err(|err| format!("Invalid JSON: {err}"))?;
-        return Ok(Input::Command(Command::Send { path, message }));
-    }
-    let command = match name {
-        "actors" if rest.is_empty() => Command::Actors {
-            offset: 0,
-            limit: 100,
-        },
-        "help" if rest.is_empty() => return Ok(Input::Help),
-        "quit" if rest.is_empty() => return Ok(Input::Quit),
-        "inspect" => Command::Inspect {
-            path: validate_path(rest)?,
-        },
-        "messages" => Command::Messages {
-            path: validate_path(rest)?,
-        },
-        "pause" => Command::Pause {
-            path: validate_path(rest)?,
-        },
-        "resume" => Command::Resume {
-            path: validate_path(rest)?,
-        },
-        "clear" => Command::Clear {
-            path: validate_path(rest)?,
-        },
-        "stop" => Command::Stop {
-            path: validate_path(rest)?,
-        },
-        "restart" => Command::Restart {
-            path: validate_path(rest)?,
-        },
-        _ => {
-            return Err(format!(
-                "Unknown command or unexpected arguments: {name}. Type help."
-            ));
-        }
-    };
-    Ok(Input::Command(command))
-}
-
-fn validate_path(path: &str) -> Result<String, String> {
-    if !path.starts_with('/') || path.chars().any(char::is_whitespace) {
-        return Err("Expected one absolute actor path, such as /user/worker".into());
-    }
-    Ok(path.into())
-}
-
-struct Client {
-    socket: WebSocket<MaybeTlsStream<std::net::TcpStream>>,
-    next_id: u64,
-}
-
-impl Client {
-    fn connect(url: &str, token: &str) -> Result<Self, Box<dyn Error>> {
-        let mut request = url.into_client_request()?;
-        if request.uri().scheme_str() != Some("ws") {
-            return Err("Use a ws:// URL through loopback or a secure tunnel".into());
-        }
-        let host = request.uri().host().ok_or("Missing console hostname")?;
-        let host = host.trim_start_matches('[').trim_end_matches(']');
-        if host != "localhost"
-            && !host
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|ip| ip.is_loopback())
-        {
-            return Err("Console connections must use loopback; use a secure tunnel for remote applications".into());
-        }
-        request
-            .headers_mut()
-            .insert("Authorization", format!("Bearer {token}").parse()?);
-        let (socket, _) = connect(request).map_err(|err| connect_error(&err, url))?;
-        if let MaybeTlsStream::Plain(stream) = socket.get_ref() {
-            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-            stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        }
-        Ok(Self { socket, next_id: 0 })
-    }
-
-    fn execute(&mut self, command: Command) -> Result<Response, Box<dyn Error>> {
-        self.next_id = self.next_id.checked_add(1).ok_or("Request ID exhausted")?;
-        let request = Request {
-            id: self.next_id,
-            command,
-        };
-        self.socket
-            .send(Message::Text(serde_json::to_string(&request)?.into()))?;
-        loop {
-            match self.socket.read()? {
-                Message::Text(text) => {
-                    let response: Response = serde_json::from_str(&text)?;
-                    if response.id != Some(request.id)
-                        || response.result.is_some() == response.error.is_some()
-                    {
-                        return Err("Invalid console response or mismatched request ID".into());
-                    }
-                    return Ok(response);
-                }
-                Message::Ping(_) | Message::Pong(_) => self.socket.flush()?,
-                Message::Close(_) => return Err("Server closed the console connection".into()),
-                _ => return Err("Expected a JSON text response".into()),
-            }
-        }
-    }
-
-    fn actors(&mut self) -> Result<Vec<Value>, Box<dyn Error>> {
-        let mut actors = Vec::new();
-        let mut offset = 0;
-        loop {
-            let response = self.execute(Command::Actors { offset, limit: 100 })?;
-            if let Some(error) = response.error {
-                return Err(format!("{}: {}", error.code, error.message).into());
-            }
-            let result = response.result.ok_or("Missing actor list")?;
-            actors.extend(
-                result["actors"]
-                    .as_array()
-                    .ok_or("Invalid actor list")?
-                    .iter()
-                    .cloned(),
-            );
-            let Some(next) = result["next_offset"].as_u64() else {
-                break;
-            };
-            let next = usize::try_from(next)?;
-            if next <= offset {
-                return Err("Actor pagination did not advance".into());
-            }
-            offset = next;
-        }
-        Ok(actors)
-    }
-}
-
-fn connect_error(error: &tungstenite::Error, url: &str) -> String {
-    use tungstenite::{Error, error::UrlError, http::StatusCode};
-    let hint = match error {
-        Error::Url(UrlError::UnableToConnect(_)) | Error::Io(_) => {
-            "Nothing accepted the connection. Check that the application is running with the \
-             `console` feature and that its console endpoint is started (Living City: \
-             `cargo run -p living-city --features console -- --console-listen 127.0.0.1:9000` \
-             with PICARD_CONSOLE_TOKEN set)."
-        }
-        Error::Http(response) if response.status() == StatusCode::UNAUTHORIZED => {
-            "The server rejected the token. Set PICARD_CONSOLE_TOKEN to the application's token."
-        }
-        Error::Http(response) if response.status() == StatusCode::NOT_FOUND => {
-            "The server has no console at this path; check the URL's path."
-        }
-        _ => return format!("Cannot connect to {url}: {error}"),
-    };
-    format!("Cannot connect to {url}: {error}\n{hint}")
-}
-
-fn history_path() -> Option<PathBuf> {
+pub(crate) fn history_path() -> Option<PathBuf> {
     env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
         .map(|root| root.join("picard-console/history"))
 }
 
-fn print_error(error: &str, color: bool) {
+pub(crate) fn print_error(error: &str, color: bool) {
     let mut safe = String::with_capacity(error.len());
     for ch in error.chars() {
         if ch.is_control() && ch != '\n' && ch != '\t' {
@@ -326,20 +113,7 @@ fn print_error(error: &str, color: bool) {
     }
 }
 
-pub(super) fn run() -> Result<(), Box<dyn Error>> {
-    let args: Vec<_> = env::args().skip(1).collect();
-    if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h") {
-        println!(
-            "Usage: picard-console ws://127.0.0.1:PORT/console\nSet PICARD_CONSOLE_TOKEN to the server's bearer token.\n\n{HELP}"
-        );
-        return Ok(());
-    }
-    if args.len() != 1 {
-        return Err("Usage: picard-console ws://127.0.0.1:PORT/console (see --help)".into());
-    }
-    let token = env::var("PICARD_CONSOLE_TOKEN")
-        .map_err(|_| "Set PICARD_CONSOLE_TOKEN to the server's bearer token")?;
-    let mut client = Client::connect(&args[0], &token)?;
+pub(crate) fn run(mut client: Client, url: &str) -> Result<(), Box<dyn Error>> {
     let color = io::stdout().is_terminal() && env::var_os("NO_COLOR").is_none();
     let mut editor = Editor::<ConsoleHelper, DefaultHistory>::new()?;
     editor.set_helper(Some(ConsoleHelper {
@@ -355,10 +129,7 @@ pub(super) fn run() -> Result<(), Box<dyn Error>> {
             Err(err) => print_error(&format!("Cannot load history: {err}"), color),
         }
     }
-    println!(
-        "Connected to {}. Type help; Tab completes commands and actor paths.",
-        args[0]
-    );
+    println!("Connected to {url}. Type help; Tab completes commands and actor paths.");
     let result = interact(&mut editor, &mut client, color);
     if let Some(path) = history {
         let saved = (|| -> Result<(), Box<dyn Error>> {
@@ -371,8 +142,7 @@ pub(super) fn run() -> Result<(), Box<dyn Error>> {
         }
     }
     result?;
-    client.socket.close(None)?;
-    Ok(())
+    client.close()
 }
 
 fn interact(
@@ -408,7 +178,7 @@ fn interact(
         match input {
             Input::Empty => {}
             Input::Quit => break,
-            Input::Help => println!("{HELP}"),
+            Input::Help => println!("{HELP}\n\n{REPL_KEYS}"),
             Input::Command(Command::Actors { .. }) => {
                 println!("{}", serde_json::to_string_pretty(&actors)?);
             }
@@ -428,54 +198,4 @@ fn interact(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_json_with_spaces_without_changing_it() {
-        let Input::Command(Command::Send { path, message }) =
-            parse(r#"send /user/worker {"Greet": {"name": "Jean Luc"}}"#).unwrap()
-        else {
-            panic!("Expected send")
-        };
-        assert_eq!(path, "/user/worker");
-        assert_eq!(message["Greet"]["name"], "Jean Luc");
-    }
-
-    #[test]
-    fn rejects_bad_commands_and_json() {
-        for line in [
-            "send /user/worker nope",
-            "send /user/worker",
-            "pause",
-            "clear relative",
-            "stop /user/a extra",
-            "quit extra",
-            "unknown",
-        ] {
-            assert!(parse(line).is_err(), "{line}");
-        }
-    }
-
-    #[test]
-    fn completes_commands_and_paths_but_not_json() {
-        let paths = vec!["/user/worker".into(), "/user/writer".into()];
-        assert_eq!(
-            complete("res", 3, &paths),
-            (0, vec!["resume".into(), "restart".into()])
-        );
-        assert_eq!(
-            complete("send /user/wo", 13, &paths),
-            (5, vec!["/user/worker".into()])
-        );
-        assert!(complete("send /user/worker {", 19, &paths).1.is_empty());
-        let line = "inspect\u{2003}/user/wo";
-        assert_eq!(
-            complete(line, line.len(), &paths),
-            (10, vec!["/user/worker".into()])
-        );
-    }
 }

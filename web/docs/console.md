@@ -45,7 +45,7 @@ or deployment environment. Do not put it in source control.
 The handle owns the listener and client threads. `stop()` reports shutdown
 errors; dropping the handle also stops and joins them, logging failures.
 Stopping the actor system does not automatically drop the console handle.
-There is no console listener or terminal REPL on WebAssembly.
+There is no console listener or terminal client on WebAssembly.
 
 The endpoint exposes application internals and destructive controls. Treat
 the token as an administrative credential. Remote use should go through a
@@ -87,7 +87,7 @@ require `Authorization: Bearer <token>`, and reject browser upgrades that carry
 an `Origin` header. Living City's `--console-route` (in `demo/src/server.rs`) is
 an axum example.
 
-## Interactive REPL
+## Terminal client
 
 The `picard-console` workspace crate provides a terminal client:
 
@@ -98,6 +98,37 @@ cargo run -p picard-console -- ws://127.0.0.1:9000/console
 Set `PICARD_CONSOLE_TOKEN` in the client's environment to the same token used
 by the server. The client does not accept tokens as command-line arguments
 or URL parameters.
+
+When stdin and stdout are terminals, the client opens a full-screen TUI. Pass
+`--repl` for the line-oriented REPL, which is also used automatically when input
+or output is redirected (for example in scripts).
+
+### TUI
+
+The TUI shows the actor tree with queue lengths and mailbox state, the selected
+actor's details, and its recent message events (newest first). It refreshes
+every second.
+
+```text
+Up/Down, j/k   Select an actor (PgUp/PgDn, Home/End jump)
+/              Filter actors by path (Enter keeps, Esc clears)
+:              Enter a command (Tab completes, Up/Down history)
+p              Pause or resume the selected actor's mailbox
+c              Clear the paused mailbox (asks for confirmation)
+s              Send a JSON message to the selected actor
+r              Restart the selected actor (asks for confirmation)
+x              Stop the selected actor (asks for confirmation)
+F5, Ctrl-L     Refresh now
+?              Toggle help
+q, Ctrl-C      Quit
+```
+
+`s` opens the command bar prefilled with `send PATH `; type the JSON payload and
+press Enter. The command bar accepts the REPL commands below. Its history is
+kept in memory only and never includes `send` commands. Colors follow
+`NO_COLOR`.
+
+### REPL
 
 Commands:
 
@@ -121,11 +152,14 @@ colors; `NO_COLOR` disables them, and redirected output is uncolored.
 
 History is stored at `$XDG_STATE_HOME/picard-console/history`, or
 `$HOME/.local/state/picard-console/history`. `send` commands are never saved
-because payloads may be sensitive. Connection and protocol errors are explicit;
-there is no automatic reconnect or retry of destructive operations. If no
-endpoint is listening, the client reports `Unable to connect` with a hint: check
-that the application was built with `console` and that it started an endpoint
-(the feature alone opens no port).
+because payloads may be sensitive.
+
+### Errors
+
+Connection and protocol errors are explicit; there is no automatic reconnect
+or retry of destructive operations. If no endpoint is listening, the client
+reports `Unable to connect` with a hint: check that the application was built
+with `console` and that it started an endpoint (the feature alone opens no port).
 
 ### Living City
 
@@ -153,8 +187,9 @@ for Clap environment options and its JSON message compatibility.
 
 - `actors` lists registered actors, including runtime actors. Each entry has
   its absolute path, parent path, Rust message type, JSON-send capability,
-  management capability, and mailbox state. The REPL follows actor-list pages
-  automatically and refreshes path completion before each prompt.
+  management capability, and mailbox state. The client follows actor-list pages
+  automatically and refreshes path completion before each prompt (REPL) or on
+  every refresh (TUI).
 - `inspect` returns one actor's metadata, queued user/system message counts,
   and paused, suspended, and scheduled flags. Snapshots are best-effort views
   of a concurrent runtime, not an atomic snapshot of the whole application.

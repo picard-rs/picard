@@ -68,7 +68,11 @@ and shutdown errors are reported, and the listener and actor system are stopped
 when the run finishes. The runtime console is separate from the browser's `/ws`
 visualization endpoint. Use a secure tunnel for remote access.
 
-Example REPL commands:
+`picard-console` opens a full-screen TUI: filter with `/` (for example
+`/supervisor`), select an actor, and press `s` to send it JSON, `p` to pause or
+resume it, or `?` for all keys. Pass `--repl` for the line-oriented REPL.
+
+Example console commands (REPL prompt or the TUI's `:` command bar):
 
 ```text
 inspect /user/supervisor

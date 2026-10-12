@@ -96,13 +96,16 @@ fn repl_help_and_missing_credentials_are_explicit() {
         .output()
         .unwrap();
     assert!(help.status.success());
-    assert!(
-        String::from_utf8(help.stdout)
-            .unwrap()
-            .contains("PICARD_CONSOLE_TOKEN")
-    );
+    let help = String::from_utf8(help.stdout).unwrap();
+    assert!(help.contains("PICARD_CONSOLE_TOKEN"), "{help}");
+    assert!(help.contains("--repl"), "{help}");
+    let unknown = Command::new(env!("CARGO_BIN_EXE_picard-console"))
+        .args(["--bogus", "ws://127.0.0.1:1/console"])
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success());
     let result = Command::new(env!("CARGO_BIN_EXE_picard-console"))
-        .arg("ws://127.0.0.1:1/console")
+        .args(["--repl", "ws://127.0.0.1:1/console"])
         .env_remove("PICARD_CONSOLE_TOKEN")
         .output()
         .unwrap();
