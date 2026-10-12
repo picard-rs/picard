@@ -107,10 +107,11 @@ or output is redirected (for example in scripts).
 
 The TUI shows the actor tree with queue lengths and mailbox state, the selected
 actor's details, and its recent message events (newest first). It refreshes
-every second.
+every second. The tree starts collapsed below the root; filtering shows all matches.
 
 ```text
 Up/Down, j/k   Select an actor (PgUp/PgDn, Home/End jump)
+Right/l, Left/h  Expand / collapse the actor's children (Left on a leaf selects its parent)
 /              Filter actors by path (Enter keeps, Esc clears)
 :              Enter a command (Tab completes, Up/Down history)
 p              Pause or resume the selected actor's mailbox
