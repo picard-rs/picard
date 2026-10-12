@@ -7,7 +7,7 @@ services:
     environment:
       LIVING_CITY_REMOTE_TOKEN: ${LIVING_CITY_REMOTE_TOKEN:?Set a strong LIVING_CITY_REMOTE_TOKEN}
     ports:
-      - "8080:8080"
+      - "${LIVING_CITY_PORT:-8080}:8080"
     expose: ["9100"]
     depends_on:
       - district-1

@@ -58,7 +58,8 @@ implemented.
 With [just](https://just.systems), run these from `demo/`: `just up` creates a
 git-ignored `.env` with a random shared token (if missing) and starts the
 nine containers; `just down`, `just restart`, `just logs [service]` and
-`just ps` manage them. `just run` and `just loadtest` start the single-process
+`just ps` manage them. The UI is published on host port 8080; set
+`LIVING_CITY_PORT` (for example in `.env`) if that port is taken. `just run` and `just loadtest` start the single-process
 demo. Without `just`, build and run the nine-container example manually:
 
 ```sh
