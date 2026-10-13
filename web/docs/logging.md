@@ -81,7 +81,3 @@ and the log lines which would have otherwise been printed:
 ```
 
 will be omitted from the log output.
-
-
-
-

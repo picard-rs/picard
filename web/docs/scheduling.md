@@ -32,6 +32,7 @@ ctx.schedule_at_time(time,
                     None,
                     "one giant leap for mankind".into());
 ```
+
 Here a message is scheduled to be sent at the specific time `time`.
 
 ## Repeat scheduling
@@ -76,7 +77,7 @@ ctx.cancel_schedule(id);
 
 Canceling a schedule removes it from the timer and the message will no longer be sent.
 
-Some example use cases of message scheduling include: 
+Some example use cases of message scheduling include:
 
 - To wait for a specific time for other actors to provide input, such as bidding systems
 - As part of workflow to provide default messages after a timeout interval

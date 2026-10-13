@@ -47,5 +47,3 @@ fn main() {
 In the background Ask sets up a temporary intermediate actor that lives for the lifetime of the ask. Other actors see this temporary actor as the `sender` and can send a message back to it. When the temporary ask actor receives a message it fulfills the outstanding future and performs a `stop` on itself to cleanup.
 
 Ask is particularly useful when you have part of an application that runs outside of the actor system, or in another actor system, such as a web server (e.g. Hyper) serving API requests. The resulting future can then be chained as part of the future stack.
-
-

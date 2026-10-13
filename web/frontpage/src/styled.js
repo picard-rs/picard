@@ -10,7 +10,7 @@ export const LayoutHeader = styled.div`
   left: 0;
   right: 0;
   margin: auto;
-  padding-top: .5rem;
+  padding-top: 0.5rem;
   max-width: 1100px;
   width: 96%;
 `
@@ -19,7 +19,7 @@ export const Section = styled.section`
   position: relative;
   z-index: 1;
   &::after {
-    background: ${props => props.bg || '#fff'};
+    background: ${(props) => props.bg || '#fff'};
     position: absolute;
     display: block;
     content: ' ';
@@ -60,7 +60,7 @@ export const Footer = styled.div`
     bottom: 16px;
   }
   &::after {
-    background-image: linear-gradient(150deg, #2F0070 0%, #10D2FB 100%);
+    background-image: linear-gradient(150deg, #2f0070 0%, #10d2fb 100%);
     position: absolute;
     display: block;
     content: ' ';
@@ -84,7 +84,6 @@ export const TimeLineBullet = styled.ul`
 `
 
 export const TimeLineBulletList = styled.li``
-
 
 export const Pre = styled.pre`
   text-align: left;

@@ -2,8 +2,8 @@ import React from 'react'
 import styled from 'styled-components'
 
 const Size = styled.div`
-  width: ${props => props.size}px;
-  height: ${props => props.size}px;
+  width: ${(props) => props.size}px;
+  height: ${(props) => props.size}px;
   & > svg {
     width: 100%;
   }
@@ -11,7 +11,7 @@ const Size = styled.div`
   align-items: center;
 `
 
-const Gitter = ({size}) => {
+const Gitter = ({ size }) => {
   return (
     <Size size={size}>
       <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">

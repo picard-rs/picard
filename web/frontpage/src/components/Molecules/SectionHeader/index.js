@@ -1,10 +1,10 @@
 import React from 'react'
-import {TypeBoldHeadingLevel1} from '../../styledTypography'
+import { TypeBoldHeadingLevel1 } from '../../styledTypography'
 import Bullet from '../../Atoms/Bullet'
-import {Wrapper} from './styled'
-import {IconWrapper, Spacer} from '../../styledUtils'
+import { Wrapper } from './styled'
+import { IconWrapper, Spacer } from '../../styledUtils'
 
-const SectionHeader = ({header}) => {
+const SectionHeader = ({ header }) => {
   return (
     <Wrapper>
       <IconWrapper size={40}>

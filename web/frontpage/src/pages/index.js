@@ -7,7 +7,7 @@ import {
   ContentsGrid,
   Footer,
   Pre,
-  LineNo
+  LineNo,
 } from '../styled'
 import { withPrefix } from 'gatsby'
 import LivingCityImage from '../components/Organisms/MainVisual/LivingCity.png'
@@ -47,7 +47,7 @@ fn main() {
 
   actor.tell("Hello actor!".to_string(), None);
 }
-`;
+`
 
 const IndexPage = () => (
   <Layout>
@@ -56,27 +56,34 @@ const IndexPage = () => (
         <GlobalHeader />
       </LayoutHeader>
       <MainVisual />
-      <Section id='demo'>
+      <Section id="demo">
         <SectionContainer>
           <Spacer size={30} />
-          <SectionHeader header='Live Demo: Living City' />
+          <SectionHeader header="Live Demo: Living City" />
           <Spacer size={16} />
           <p>
-            Every car, junction, traffic light and district in this city is a Picard actor.
-            Spawn thousands of vehicles, crash an actor and watch supervision restart it, or add a
-            whole district at runtime. The simulation runs entirely in your browser: Picard compiled
-            to WebAssembly, no server involved.
+            Every car, junction, traffic light and district in this city is a
+            Picard actor. Spawn thousands of vehicles, crash an actor and watch
+            supervision restart it, or add a whole district at runtime. The
+            simulation runs entirely in your browser: Picard compiled to
+            WebAssembly, no server involved.
           </p>
           <Spacer size={16} />
           <a href={withPrefix('/demo/')}>
             <img
               src={LivingCityImage}
-              alt='Screenshot of the Living City demo'
-              style={{ width: '100%', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,.25)' }}
+              alt="Screenshot of the Living City demo"
+              style={{
+                width: '100%',
+                borderRadius: 8,
+                boxShadow: '0 8px 30px rgba(0,0,0,.25)',
+              }}
             />
           </a>
           <Spacer size={16} />
-          <ButtonLink href={withPrefix('/demo/')} primary={'1'}>Launch the demo</ButtonLink>
+          <ButtonLink href={withPrefix('/demo/')} primary={'1'}>
+            Launch the demo
+          </ButtonLink>
         </SectionContainer>
         <Spacer size={80} />
       </Section>
@@ -86,50 +93,57 @@ const IndexPage = () => (
           <ContentsGrid>
             <Content
               bulletSrc={IconConccurent}
-              header='Actor Based Concurrency'
-              body='Actors expose a message based API resulting in fast, non-blocking code execution while also eliminating race conditions to make concurrent code a breeze to write.'
+              header="Actor Based Concurrency"
+              body="Actors expose a message based API resulting in fast, non-blocking code execution while also eliminating race conditions to make concurrent code a breeze to write."
             />
             <Content
               bulletSrc={IconSelfHeal}
-              header='Self Healing'
-              body='Build applications that isolate and recover from failures. Actors provide a Supervision Strategy that form the core of resilient application design in Picard.'
+              header="Self Healing"
+              body="Build applications that isolate and recover from failures. Actors provide a Supervision Strategy that form the core of resilient application design in Picard."
             />
             <Content
               bulletSrc={IconEventSoursing}
-              header='CQRS Entity Management'
-              body='The separate picard-cqrs crate routes commands by entity ID and manages active entity actors. Your application supplies any persistence and state recovery.'
+              header="CQRS Entity Management"
+              body="The separate picard-cqrs crate routes commands by entity ID and manages active entity actors. Your application supplies any persistence and state recovery."
             />
             <Content
               bulletSrc={IconGeneral}
-              header='General Purpose'
-              body='In the Cloud, Microservices, IoT, Drones, AI and more. Rust compiles to OS binaries, has no VM or GC overhead, and requires only a few megabytes of memory.'
+              header="General Purpose"
+              body="In the Cloud, Microservices, IoT, Drones, AI and more. Rust compiles to OS binaries, has no VM or GC overhead, and requires only a few megabytes of memory."
             />
             <Content
               bulletSrc={IconModular}
-              header='Modular Framework'
-              body='The runtime includes actor dispatch, logging, message scheduling, and configurable mailboxes. Optional features add diagnostics, serialization, a runtime console, and remote messaging.'
+              header="Modular Framework"
+              body="The runtime includes actor dispatch, logging, message scheduling, and configurable mailboxes. Optional features add diagnostics, serialization, a runtime console, and remote messaging."
             />
             <Content
               bulletSrc={IconModern}
-              header='Modern Rust Design'
-              body='Execute Rust Futures with ease and no unsafe code used.'
+              header="Modern Rust Design"
+              body="Execute Rust Futures with ease and no unsafe code used."
             />
           </ContentsGrid>
         </SectionContainer>
         <Spacer size={80} />
       </Section>
-      <Section >
+      <Section>
         <SectionContainer>
           <Spacer size={20} />
-          <SectionHeader header='Example Code' />
+          <SectionHeader header="Example Code" />
           <Spacer size={24} />
-          <Highlight {...defaultProps} theme={theme} code={exampleCode} language="rust">
+          <Highlight
+            {...defaultProps}
+            theme={theme}
+            code={exampleCode}
+            language="rust"
+          >
             {({ className, style, tokens, getLineProps, getTokenProps }) => (
               <Pre className={className} style={style}>
                 {tokens.map((line, i) => (
                   <div {...getLineProps({ line, key: i })}>
                     <LineNo>{i + 1}</LineNo>
-                    {line.map((token, key) => <span {...getTokenProps({ token, key })} />)}
+                    {line.map((token, key) => (
+                      <span {...getTokenProps({ token, key })} />
+                    ))}
                   </div>
                 ))}
               </Pre>
