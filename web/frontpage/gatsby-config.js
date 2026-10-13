@@ -4,5 +4,5 @@ module.exports = {
   siteMetadata: {
     title: 'Picard | Rust Actors',
   },
-  plugins: ['gatsby-plugin-react-helmet', 'gatsby-plugin-styled-components']
+  plugins: ['gatsby-plugin-react-helmet', 'gatsby-plugin-styled-components'],
 }

@@ -17,15 +17,15 @@ const buttonStyle = `
 
 export const StyledButton = styled.button`
   ${buttonStyle}
-  background: ${props => props.primary ? '#0EDC69' : 'transparent'};
-  border: ${props => props.primary ? 'none' : '1px solid #fff'};
+  background: ${(props) => (props.primary ? '#0EDC69' : 'transparent')};
+  border: ${(props) => (props.primary ? 'none' : '1px solid #fff')};
 `
 
 export const StyledButtonLink = styled.a`
   ${buttonStyle}
   text-decoration: none;
-  background: ${props => props.primary ? '#0EDC69' : 'transparent'};
-  border: ${props => props.primary ? 'none' : '1px solid #fff'};
+  background: ${(props) => (props.primary ? '#0EDC69' : 'transparent')};
+  border: ${(props) => (props.primary ? 'none' : '1px solid #fff')};
 `
 
 export const IconWrapper = styled.span``

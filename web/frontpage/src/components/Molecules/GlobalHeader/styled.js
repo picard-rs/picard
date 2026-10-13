@@ -19,7 +19,7 @@ export const PicardWrapper = styled.div`
 
 export const HeaderBrandText = styled.span`
   font-style: italic;
-  padding-left: .5rem;
+  padding-left: 0.5rem;
   color: #fff;
 `
 
@@ -33,4 +33,3 @@ export const Nav = styled.nav`
     }
   }
 `
-

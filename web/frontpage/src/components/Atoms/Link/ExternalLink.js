@@ -1,10 +1,12 @@
-import styled from 'styled-components';
+import styled from 'styled-components'
 
 export default styled.a`
   color: #fff;
   font-weight: bold;
   text-decoration: none;
-  ${props => props.secondary && `
+  ${(props) =>
+    props.secondary &&
+    `
     font-size: 15px;
   `}
 `
@@ -12,27 +14,27 @@ export default styled.a`
 export const ExternalLinkWithIcon = styled.a`
   align-items: center;
   display: flex;
-  opacity: .95;
+  opacity: 0.95;
   position: relative;
-  transition-duration: .3s;
+  transition-duration: 0.3s;
   &:after {
-    content: "";
+    content: '';
     background: #fff;
     display: block;
     height: 1px;
     width: 0%;
     opacity: 0;
-    transition-duration: .3s;
+    transition-duration: 0.3s;
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
-    margin :auto;
+    margin: auto;
   }
   & > * {
-    transition-duration: .3s;
+    transition-duration: 0.3s;
     &:last-child {
-      transition-delay: .075s;
+      transition-delay: 0.075s;
     }
   }
   &:hover {

@@ -48,14 +48,14 @@ website is at <https://picard.rs>.
 
 The Rust 2024 Cargo workspace uses resolver 3. Its members are under `crates/`:
 
-| Crate | Purpose |
-| --- | --- |
-| `picard` | Runtime, actors, system, kernel, mailboxes, channels, timer, logger, configuration |
-| `picard-macros` | `#[actor]` attribute macro |
-| `picard-patterns` | Reusable patterns such as `ask` and `transform` |
-| `picard-cqrs` | CQRS and event-sourcing support |
-| `picard-testkit` | Test helpers such as probes |
-| `picard-console` | Runtime console application |
+| Crate             | Purpose                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `picard`          | Runtime, actors, system, kernel, mailboxes, channels, timer, logger, configuration |
+| `picard-macros`   | `#[actor]` attribute macro                                                         |
+| `picard-patterns` | Reusable patterns such as `ask` and `transform`                                    |
+| `picard-cqrs`     | CQRS and event-sourcing support                                                    |
+| `picard-testkit`  | Test helpers such as probes                                                        |
+| `picard-console`  | Runtime console application                                                        |
 
 Other important locations:
 

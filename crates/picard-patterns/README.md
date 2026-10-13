@@ -11,10 +11,12 @@ The intention is to add many patterns, some of which are well documented in popu
 ## Patterns:
 
 ### Ask
+
 The Ask pattern allows values to be sent by actors to outside of the actor system. The value is delivered as a `Future`.
 
 Let's look at how this works:
 `Cargo.toml`:
+
 ```toml
 [dependencies]
 picard = "0.3.0"
@@ -22,6 +24,7 @@ picard-patterns = "0.3.0"
 ```
 
 `main.rs`:
+
 ```rust
 use futures::future::RemoteHandle;
 use picard_patterns::ask::*;
@@ -68,7 +71,7 @@ Ask is particularly useful when you have part of an application that runs outsid
 Transform makes changing actor behavior based on its current state easier to reason about. Since actors maintain state, and indeed is a primary concern, being able to handle messages differently based on that state is important. The Transform pattern separates message handling by dedicating a receive function per state. This saves excessive `match`ing to handle several possible states, i.e. handling behavior is pre-empted at the time of state change instead of on each message receive.
 
 !!! info
-    If you're familair with Akka on the JVM, `transform` resembles `become`.
+If you're familair with Akka on the JVM, `transform` resembles `become`.
 
 Example:
 
@@ -157,4 +160,4 @@ impl Actor for ShoppingCart {
 }
 ```
 
-The `transform!` macro expects the field name of the current receive function on `self` to be named `rec`. It's easy to use a different name and either use your own macro, or just set the fuction using standard code. The advantage of `transform!` is that it is easy to read and identify when transformation is happening since it is distinct from standard code. 
+The `transform!` macro expects the field name of the current receive function on `self` to be named `rec`. It's easy to use a different name and either use your own macro, or just set the fuction using standard code. The advantage of `transform!` is that it is easy to read and identify when transformation is happening since it is distinct from standard code.

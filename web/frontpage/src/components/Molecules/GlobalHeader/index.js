@@ -5,7 +5,6 @@ import { ExternalLinkWithIcon } from '../../Atoms/Link/ExternalLink'
 import GithubLogo from '../../Atoms/Logo/Github'
 import GitterLogo from '../../Atoms/Logo/Gitter'
 
-
 const GlobalHeader = () => {
   return (
     <Wrapper>
@@ -14,10 +13,20 @@ const GlobalHeader = () => {
         <HeaderBrandText>Picard</HeaderBrandText>
       </PicardWrapper>
       <Nav>
-        <ExternalLinkWithIcon secondary href="https://github.com/picard-rs/picard/" target="_blank" rel="noopener noreferrer">
+        <ExternalLinkWithIcon
+          secondary
+          href="https://github.com/picard-rs/picard/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <GithubLogo size={18} /> <span>View on GitHub</span>
         </ExternalLinkWithIcon>
-        <ExternalLinkWithIcon secondary href="https://gitter.im/picard-rs/Lobby" target="_blank" rel="noopener noreferrer">
+        <ExternalLinkWithIcon
+          secondary
+          href="https://gitter.im/picard-rs/Lobby"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <GitterLogo size={18} /> <span>Chat on Gitter</span>
         </ExternalLinkWithIcon>
       </Nav>
