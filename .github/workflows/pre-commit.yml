@@ -27,4 +27,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
           components: clippy, rustfmt
-      - uses: pre-commit/action@v2.0.0
+      - name: Install pre-commit
+        run: python -m pip install pre-commit
+      - name: Run pre-commit
+        run: pre-commit run --all-files
