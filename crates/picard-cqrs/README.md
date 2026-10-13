@@ -21,6 +21,7 @@ Since each entity has its own actor there needs to be a coordinator that creates
 Let's look at how to set up an entity manager that represents bank accounts `BankAccount`:
 
 `Cargo.toml`:
+
 ```toml
 [dependencies]
 picard = "0.1.8"
@@ -29,6 +30,7 @@ picard-cqrs = "0.1.8"
 ```
 
 Code:
+
 ```rust
 use picard::actors::*;
 use picard_default::DefaultModel;

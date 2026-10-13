@@ -10,13 +10,22 @@ repos:
     rev: v1.0
     hooks:
       - id: clippy
-        args: ["--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
+        args:
+          [
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--",
+            "-D",
+            "warnings",
+          ]
         name: cargo clippy https://github.com/rust-lang/rust-clippy/blob/master/README.md .
       - id: cargo-check
         args: ["--workspace", "--all-targets"]
         name: cargo check https://doc.rust-lang.org/cargo/commands/cargo-check.html .
       - id: fmt
         args: ["--all"]
+        pass_filenames: false
         name: rustfmt https://github.com/rust-lang/rustfmt/blob/master/README.md .
   - repo: https://github.com/pre-commit/mirrors-prettier.git
     rev: v2.2.0

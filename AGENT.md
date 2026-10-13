@@ -3,6 +3,7 @@
 Picard is an actor framework for Rust (Actor Model, supervision, pub/sub channels, scheduling, CQRS). Concurrency runs on `futures::executor::ThreadPool`. Website and docs: <https://picard.rs>.
 
 ## AGENT RULES
+
 - you **MUST** never do `git push`, unless you're explicitly told to
 - you **MUST** always run formatting tools such as `cargo fmt` after you changed the contents of a file
 - you **MUST** use conventional commits when committing (`feat`, `fix`, `perf`, `refactor`, `chore`, `docs`), with `!` and a `BREAKING CHANGE:` footer for API breaks
@@ -24,6 +25,7 @@ Cargo workspace (`resolver = "3"`, `edition = "2024"`). Members under `crates/`:
 | `picard-testkit`  | Test helpers (`probe`)                                                           |
 
 Other top-level items:
+
 - `demo/`: the `living-city` workspace crate, a browser-based traffic simulation built from Picard actors (brief in `demo/README.md`, docs in `demo/GUIDE.md`).
 - `config/picard.toml`, `config/app.toml`: default configuration files.
 - `examples/*.rs`, `crates/picard/examples/actor_demo.rs`: runnable examples.
