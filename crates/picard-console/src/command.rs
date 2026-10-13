@@ -225,7 +225,10 @@ mod tests {
             complete("send /user/wo", 13, &paths),
             (5, vec!["/user/worker".into()])
         );
-        assert!(complete("send /user/worker {", 19, &paths).1.is_empty());
+        assert_eq!(
+            complete("send /user/worker {", 19, &paths).1,
+            Vec::<String>::new()
+        );
         let line = "inspect\u{2003}/user/wo";
         assert_eq!(
             complete(line, line.len(), &paths),
