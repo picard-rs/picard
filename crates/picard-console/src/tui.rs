@@ -1140,7 +1140,7 @@ mod tests {
         }
         edit.edit(key(KeyCode::Backspace));
         assert_eq!(edit.text, "pa");
-        assert!(edit.complete(&[]).is_empty());
+        assert_eq!(edit.complete(&[]), Vec::<String>::new());
         assert_eq!(edit.text, "pause ");
         let mut command = LineEdit::with_text("re".to_owned());
         assert_eq!(command.complete(&[]).len(), 2);
@@ -1154,7 +1154,7 @@ mod tests {
         assert_eq!(edit.complete(&paths).len(), 2);
         assert_eq!(edit.text, "pause /user/worker-");
         edit.edit(key(KeyCode::Char('b')));
-        assert!(edit.complete(&paths).is_empty());
+        assert_eq!(edit.complete(&paths), Vec::<String>::new());
         assert_eq!(edit.text, "pause /user/worker-b ");
 
         edit.edit(key(KeyCode::Left));

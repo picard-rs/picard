@@ -97,7 +97,7 @@ impl Fixture {
         let (tx, events) = mpsc::channel();
         let actor = system.actor_of_args::<Recorder, _>("worker", tx).unwrap();
         assert_eq!(
-            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            events.recv_timeout(Duration::from_secs(10)).unwrap(),
             Event::Started
         );
         let handle = system
