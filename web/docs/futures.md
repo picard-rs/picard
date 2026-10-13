@@ -1,20 +1,27 @@
 # Running Futures
 
-Picard can execute and drive futures to completion. In fact, internally actors are executed as futures by the dispatcher. This means Picard can run any future on the same executor, alongside actors.
+Picard can execute and drive futures to completion. Internally, actors are
+also executed as futures by the dispatcher. `ActorSystem` and `Context` both
+provide a `run` method.
 
-`ActorSystem` and `Context` both have a `run` method that takes a future to run:
+On native targets, Picard uses a futures thread pool. On WebAssembly it
+dispatches tasks to the browser event loop instead. This example shows the
+native API:
 
-```rust
-let handle = system.run(async move {
-    "someval".to_string()
-});
+```rust,no_run
+use futures::executor::block_on;
+use picard::actors::*;
 
-assert_eq!(block_on(handle), "someval".to_string());
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let system = ActorSystem::new()?;
+    let handle = system.run(async { "someval".to_string() })?;
+    assert_eq!(block_on(handle), "someval");
+    Ok(())
+}
 ```
 
-`sys.run` schedules the future for execution it will drive it to completion utilizing the dispatcher's thread pool. `run` returns a `futures::future::RemoteHandle` future that can be used to extract the result.
-
-> **Note:** Picard executes futures using the `Futures` crate's `futures::executor::ThreadPool`.
+`run` returns a `futures::future::RemoteHandle` for the future's output, or a
+`SpawnError` if the executor cannot accept the task.
 
 In the next section we'll see how to to test Picard applications.
 

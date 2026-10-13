@@ -28,26 +28,25 @@ import IconModern from '../components/Atoms/Icons/icon-modern.png'
 import IconModular from '../components/Atoms/Icons/icon-modular.png'
 import IconSelfHeal from '../components/Atoms/Icons/icon-self-heal.png'
 
-const exampleCode = `struct MyActor;
+const exampleCode = `use picard::actors::*;
+
+#[derive(Default)]
+struct MyActor;
 
 impl Actor for MyActor {
     type Msg = String;
 
-    fn receive(&mut self,
-                ctx: &Context<Self::Msg>,
-                msg: Self::Msg,
-                sender: ActorRef<Self::Msg>) {
-
-        println!("received {}", msg);
+  fn recv(&mut self, _ctx: &Context<Self::Msg>, msg: Self::Msg, _sender: Sender) {
+    println!("received {msg}");
     }
 }
 
-let sys = ActorSystem::new(&model).unwrap();
+fn main() {
+  let sys = ActorSystem::new().unwrap();
+  let actor = sys.actor_of::<MyActor>("my-actor").unwrap();
 
-let props = MyActor::props();
-let a = sys.actor_of(props, "a").unwrap();
-
-a.tell("Hello actor!".to_string(), None);
+  actor.tell("Hello actor!".to_string(), None);
+}
 `;
 
 const IndexPage = () => (
@@ -97,8 +96,8 @@ const IndexPage = () => (
             />
             <Content
               bulletSrc={IconEventSoursing}
-              header='Event Sourcing & CQRS'
-              body='Use event sourcing and Command Query Responsibility Separation (CQRS) to drive extremely fast persistent data applications.'
+              header='CQRS Entity Management'
+              body='The separate picard-cqrs crate routes commands by entity ID and manages active entity actors. Your application supplies any persistence and state recovery.'
             />
             <Content
               bulletSrc={IconGeneral}
@@ -108,7 +107,7 @@ const IndexPage = () => (
             <Content
               bulletSrc={IconModular}
               header='Modular Framework'
-              body='Default thread management, concurrent logging, message scheduling and data persistence are included and can be switched for alternative implementations.'
+              body='The runtime includes actor dispatch, logging, message scheduling, and configurable mailboxes. Optional features add diagnostics, serialization, a runtime console, and remote messaging.'
             />
             <Content
               bulletSrc={IconModern}
@@ -124,7 +123,7 @@ const IndexPage = () => (
           <Spacer size={20} />
           <SectionHeader header='Example Code' />
           <Spacer size={24} />
-          <Highlight {...defaultProps} theme={theme} code={exampleCode} language="jsx">
+          <Highlight {...defaultProps} theme={theme} code={exampleCode} language="rust">
             {({ className, style, tokens, getLineProps, getTokenProps }) => (
               <Pre className={className} style={style}>
                 {tokens.map((line, i) => (
@@ -140,7 +139,7 @@ const IndexPage = () => (
         <Spacer size={160} />
       </Section>
       <Footer>
-        <Copyright>&copy; Picard 2019</Copyright>
+        <Copyright>&copy; Picard {new Date().getFullYear()}</Copyright>
       </Footer>
     </Wrapper>
   </Layout>

@@ -45,22 +45,16 @@ Framework settings missing from the config files fall back to the defaults of `P
 
 It is highly encouraged in terms of function signatures to not pass around instances of `PicardConfig`. Not only is it slower but it makes understanding what a function does difficult. It is always better to extract values from configuration early on in your application and then pass those to functions. If you have many settings to pass to a function a dedicated settings struct could be used.
 
-### Module Settings
+### Application Settings
 
-It is encouraged to reuse the standard section names for modules. For example, if you have a custom logging module then use `[log]` in `picard.toml`. This makes it easier for people to locate these settings based on module behavior.
-
-Example
-
-```toml
-
-[persistence]
-redis_url = "tcp://127.0.0.1"
-resis_pwd = "password123"
-``` 
-
-Or 
+`PicardConfig` accepts framework settings such as `[log]`, `[mailbox]`,
+`[dispatcher]`, and `[cqrs]`. Put application-specific settings under
+`[app]`; they are available through `sys.config().app` and are not interpreted
+by Picard. For example:
 
 ```toml
-[persistence]
-redis = { url = "tcp://127.0.0.1", pwd = "password123" }
+[app.storage]
+url = "redis://127.0.0.1"
 ```
+
+The application is responsible for reading and applying its own settings.

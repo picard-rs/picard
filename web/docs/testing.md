@@ -27,7 +27,6 @@ struct Counter {
 impl Actor for Counter {
     // we used the #[actor] attribute so CounterMsg is the Msg type
     type Msg = CounterMsg;
-    type Evt = ();
 
     fn recv(&mut self,
                 ctx: &Context<Self::Msg>,

@@ -7,9 +7,9 @@ Picard achieves this by:
 - Exposing a simple `Actor` trait
 - Actor supervision based on the actor hierarchy
 - Allowing Actors to own their state so `Sync` is not required
-- Ensuring an 'at most one-time' message guarantee
+- Providing mailbox delivery within a running process (not durable or exactly-once delivery)
 - Providing a configurable, modular system
-- Promotion of modern, event-based data persistence
+- Optional CQRS entity management through the separate `picard-cqrs` crate
 - Low memory footprint
 - Fast execution
 - No `unsafe` code (with the exception of `impl Send` and `impl Sync`)
@@ -26,19 +26,25 @@ Futures allow software developers to write concurrent code in an almost single-t
 
 Actors on the other hand are used when state exists and must be maintained between cycles of when an actor is running and when it is idle. Actors are well suited for long running processes that can even span the lifetime of the application itself. Actors also form a hierarchy, with parent and child actors, which communicate with each other via a message based API. Since Actors are aware of other Actors in the system they can heal each other when unexpected things happen, such as panics.
 
-Under the covers, Picard actors are Futures and run as Futures on the underlying thread pool.
+Under the covers, Picard actors are futures. Native builds use a thread pool;
+WebAssembly builds dispatch tasks on the browser event loop.
 
 **How do actors compare to threads?**
 
-Actors only run and use a CPU thread when they have one or more messages in their mailbox. When an actor is sent a message that actor is scheduled for execution. When a thread is available the actor and its state are transferred (i.e. `Send`) to the thread and the actor processes its messages (i.e. the `receive` method is invoked). It is only then that the actor will use any OS thread resources. When an actor is idle it requires no thread execution time.
+Actors are scheduled when they have messages to process. On native targets,
+the dispatcher runs actor tasks on its thread pool; idle actors do not occupy a
+thread. The browser event loop is used on WebAssembly.
 
 It's possible to have thousands or millions of actors that share just two CPU core/threads.
 
-**Can Picard run on muliple hosts?**
+**Can Picard communicate across hosts?**
 
-Like any application a Picard application can easily be distributed across multiple network hosts or Docker containers. Applications can be load balanced using simple load balancing or form part of a more complex system using a [Kubernetes](https://kubernetes.io/), [Linkerd](https://linkerd.io/), etc.
-
-It is only when an an application uses Picard's CQRS features should additional architecture design be considered to manage entities. In a CQRS environment it is critical to ensure that only one instance of an entity actor be running across multiple hosts. Picard Cluster is currently in development to make this coordination available.
+The optional [`remoting` feature](cluster.md) provides authenticated WebSocket
+message delivery between Picard systems. It is not transparent clustering:
+there is no discovery, failover, remote actor-reference conversion, or
+cross-host coordination to ensure one active actor per entity. The separate
+`picard-cqrs` crate manages entities within one actor system; applications
+that distribute entity ownership must provide that coordination themselves.
 
 **Can multiple `ActorSystem` instances run in the same app?**
 
@@ -48,14 +54,14 @@ An exception to this advice is when an application is handling greatly varying w
 
 **Does Picard use `unsafe` code?**
 
-Picard does not use `unsafe` for any memory management. We believe it's better to work with the Borrow Checker and compiler than against them.
-
-`unsafe` is only used to explicitly mark a few types as `Send` or `Sync` to assist the compiler. Both of these have empty implementations, i.e. no actual unsafe code:
-
-```
-unsafe impl<T: Message> Send for Envelope<T> {}
-```
+The Picard runtime crates currently contain no `unsafe` blocks or unsafe trait
+implementations. This describes the project source, not its dependencies.
 
 **Are there any benchmarks?**
 
-We're working to provide common actor benchmarks soon. We want to make sure we're using benchmarks that actually mean something to real world scenarios. In terms of pure message throughput, one actor to another, several million messages can be sent per second on a standard 2018 laptop.
+The repository includes Criterion benchmarks for message throughput, actor
+round-trip latency, actor creation, mailbox workloads, scheduling, and other
+scenarios. Run them with `cargo bench -p picard --bench runtime` or
+`cargo bench -p picard --bench actor_suite`. Results depend on hardware and
+workload; benchmark numbers should not be treated as a general throughput
+guarantee.

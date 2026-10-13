@@ -16,7 +16,7 @@ Picard provides:
 - An Actor based execution runtime
 - Actor supervision to isolate and recover from failures
 - A modular system
-- Concurrency built on `futures::execution::ThreadPool`
+- Native concurrency built on a futures thread pool, with browser event-loop execution on WebAssembly
 - Publish/Subscribe messaging via actor channels
 - Message scheduling
 - Out-of-the-box, configurable, non-blocking logging
@@ -32,7 +32,7 @@ Picard provides:
 
 ```toml
 [dependencies]
-picard = "0.4.1"
+picard = "0.4.2"
 ```
 
 `main.rs`:
